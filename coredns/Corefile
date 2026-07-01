@@ -1,0 +1,29 @@
+# Zona para os TLDs locais (ex: local, test, example)
+__DNS_LOCAL_TLD_ZONES__ {
+    bind __BIND_IPS__
+    log
+    errors
+
+    template IN A {
+        match ".*\\.(__DNS_LOCAL_TLD_REGEX__)\\."
+        answer "{{ .Name }} 3600 IN A __ANSWER_IP__"
+    }
+
+    template IN AAAA {
+        match ".*\\.(__DNS_LOCAL_TLD_REGEX__)\\."
+        rcode NXDOMAIN
+    }
+
+    template IN ANY {
+        match ".*\\.(__DNS_LOCAL_TLD_REGEX__)\\."
+        rcode NXDOMAIN
+    }
+}
+
+# Zona padrão: encaminha tudo para upstream
+. {
+    bind __BIND_IPS__
+    forward . 8.8.8.8 1.1.1.1
+    log
+    errors
+}

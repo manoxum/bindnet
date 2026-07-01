@@ -1,0 +1,81 @@
+name: central-network-stack
+
+services:
+  nginx-ui:
+    image: uozi/nginx-ui:v2.3.11
+    container_name: central-nginx-ui
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Africa/Sao_Tome}
+    ports:
+      # Porta administrativa direta. O trafego publico 80/443 passa pelo cert-proxy.
+      - "9080:9000"
+    volumes:
+      - nginx_config:/etc/nginx
+      - nginx_ui_data:/etc/nginx-ui
+      - www_data:/var/www
+    networks:
+      - proxy
+
+  cert-proxy:
+    build:
+      context: ./cert-proxy
+    image: central/local-ca-cert-proxy:local
+    container_name: central-cert-proxy
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Africa/Sao_Tome}
+      UPSTREAM_HTTP_URL: http://nginx-ui:80
+      UPSTREAM_HTTPS_URL: https://nginx-ui:443
+      CA_COMMON_NAME: Central Local Development CA
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - cert_proxy_data:/data
+    depends_on:
+      - nginx-ui
+    networks:
+      - proxy
+
+  dns-provider:
+    build:
+      context: ./coredns
+    image: central/coredns-split-horizon:local
+    container_name: central-dns-provider
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    depends_on:
+      - hotspot
+
+
+  hotspot:
+    build:
+      context: ./hotspot
+    image: central/create-ap-hotspot:local
+    container_name: central-hotspot
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    env_file:
+      - .env
+
+networks:
+  proxy:
+    driver: bridge
+
+volumes:
+  nginx_config:
+    name: central_nginx_config
+    external: true
+  nginx_ui_data:
+    name: central_nginx_ui_data
+    external: true
+  www_data:
+    name: central_www_data
+    external: true
+  cert_proxy_data:
+    name: central_cert_proxy_data
+    external: true

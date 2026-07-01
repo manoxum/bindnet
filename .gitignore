@@ -1,0 +1,4 @@
+# contem segredos (WIFI_PASSWORD etc.)
+.env
+
+.idea/
