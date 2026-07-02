@@ -2,3 +2,12 @@
 .env
 
 .idea/
+
+# artefatos de build do frontend/backend/worker
+node_modules/
+services/frontend/dist/
+services/backend/backend
+services/worker/controller/worker
+services/worker/dns/dns-provider
+services/migration/dist/
+services/migration/prisma/generated/

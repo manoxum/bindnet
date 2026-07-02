@@ -1,0 +1,77 @@
+// Prisma so gera e aplica migrations (prisma migrate deploy) contra o
+// Postgres do stack - o services/backend (Go) nunca usa o Prisma
+// Client, so o driver Postgres puro (ver services/backend/db.go).
+// Rodar `npx prisma generate` aqui e opcional/nao usado em producao;
+// o unico artefato que importa e prisma/migrations/.
+
+generator client {
+  provider      = "prisma-client-js"
+  // node:22-alpine usa musl + OpenSSL 3.x - sem isso o Prisma tenta
+  // adivinhar a engine certa e falha silenciosamente em runtime (ver
+  // Dockerfile: precisa tambem do pacote "openssl" instalado via apk).
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// CA local usada pela gestao de certificados (services/backend/certificates.go).
+// Singleton na pratica (no maximo uma linha) - garantido por
+// loadOrImportCA, nao por constraint de banco.
+//
+// id usa dbgenerated("gen_random_uuid()") em vez de @default(uuid()):
+// o services/backend (Go) insere linhas via SQL puro, nao via Prisma
+// Client, entao o UUID precisa ser gerado pelo proprio Postgres
+// (DEFAULT na coluna), nao por uma funcao do lado do client Prisma.
+model Ca {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  commonName     String   @map("common_name")
+  organization   String
+  serialNumber   String   @map("serial_number")
+  certificatePem String   @map("certificate_pem")
+  privateKeyPem  String   @map("private_key_pem")
+  issuedAt       DateTime @map("issued_at") @db.Timestamptz
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz
+  source         String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("ca")
+}
+
+// Certificados-folha emitidos pela CA acima, via
+// POST /api/certificates no painel de gestao.
+model Certificate {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  domain         String
+  commonName     String    @map("common_name")
+  dnsNames       String[]  @map("dns_names")
+  ipAddresses    String[]  @map("ip_addresses")
+  serialNumber   String    @unique @map("serial_number")
+  certificatePem String    @map("certificate_pem")
+  privateKeyPem  String    @map("private_key_pem")
+  issuedAt       DateTime  @map("issued_at") @db.Timestamptz
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([domain])
+  @@map("certificates")
+}
+
+// Aloca um IP de loopback (127.x.y.z) persistente e unico por hostname,
+// usado pelo dns-provider (services/worker/dns) para resolver consultas
+// *.local/*.test/*.example vindas do proprio host (127.0.0.1) - cada
+// hostname sempre resolve para o mesmo IP entre reinicios. loopbackOffset
+// vem de local_dns_records_offset_seq (comeca em 2; offset 1 = 127.0.0.1
+// e reservado). dns-provider mantem um cache Redis hidratado a partir
+// desta tabela na inicializacao - ver services/worker/dns/cache.go.
+model LocalDnsRecord {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  hostname       String   @unique
+  loopbackOffset Int      @unique @map("loopback_offset")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("local_dns_records")
+}
