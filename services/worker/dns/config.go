@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"sort"
 	"strings"
-	"time"
 )
 
 func getenv(name, fallback string) string {
@@ -33,7 +31,7 @@ func parseTLDs(raw string) (map[string]bool, error) {
 func parseOptionalTLDs(raw string, envName string) (map[string]bool, error) {
 	tlds := map[string]bool{}
 	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' || r == ' ' }) {
-		tld := strings.ToLower(strings.TrimPrefix(part, "."))
+		tld := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(part), "."))
 		if tld == "" {
 			continue
 		}
@@ -45,11 +43,52 @@ func parseOptionalTLDs(raw string, envName string) (map[string]bool, error) {
 	return tlds, nil
 }
 
+func parseOptionalDomains(raw string, envName string) (map[string]bool, error) {
+	domains := map[string]bool{}
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' || r == ' ' }) {
+		domain := normalizeZone(part)
+		if domain == "" {
+			continue
+		}
+		if !isValidDomain(domain) {
+			return nil, fmt.Errorf("%s contem dominio invalido: %s", envName, domain)
+		}
+		domains[domain] = true
+	}
+	return domains, nil
+}
+
+func normalizeZone(value string) string {
+	domain := strings.ToLower(strings.TrimSpace(value))
+	domain = strings.TrimPrefix(domain, "*.")
+	domain = strings.TrimPrefix(domain, ".")
+	return strings.TrimSuffix(domain, ".")
+}
+
 func isValidTLD(tld string) bool {
-	if strings.HasPrefix(tld, "-") || strings.HasSuffix(tld, "-") {
+	if strings.Contains(tld, ".") {
 		return false
 	}
-	for _, r := range tld {
+	return isValidDNSLabel(tld)
+}
+
+func isValidDomain(domain string) bool {
+	for _, label := range strings.Split(domain, ".") {
+		if !isValidDNSLabel(label) {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidDNSLabel(label string) bool {
+	if label == "" {
+		return false
+	}
+	if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+		return false
+	}
+	for _, r := range label {
 		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
 			return false
 		}
@@ -57,43 +96,26 @@ func isValidTLD(tld string) bool {
 	return true
 }
 
-func tldNames(tlds map[string]bool) []string {
-	names := make([]string, 0, len(tlds))
-	for tld := range tlds {
-		names = append(names, tld)
+func zoneNames(zones map[string]bool) []string {
+	names := make([]string, 0, len(zones))
+	for zone := range zones {
+		names = append(names, zone)
 	}
 	sort.Strings(names)
 	return names
 }
 
-func instanceIP() (net.IP, error) {
-	if raw := os.Getenv("HOST_SOURCE_CIDR"); raw != "" {
-		if ip := ipFromCIDR(raw); ip != nil {
-			return ip, nil
+// parsePeers separa DISCOVER_PEERS em enderecos "host:porta" individuais
+// - sem validacao de formato pesada, cada endereco e usado como esta em
+// chamadas HTTP para o peer (ver discover_peer.go).
+func parsePeers(raw string) []string {
+	var peers []string
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' || r == ' ' }) {
+		peer := strings.TrimSpace(part)
+		if peer == "" {
+			continue
 		}
-		return nil, fmt.Errorf("HOST_SOURCE_CIDR invalido: %s", raw)
+		peers = append(peers, peer)
 	}
-
-	conn, err := net.DialTimeout("udp", "8.8.8.8:80", 3*time.Second)
-	if err != nil {
-		return nil, fmt.Errorf("nao foi possivel detectar o IP da instancia: %w", err)
-	}
-	defer conn.Close()
-
-	addr, ok := conn.LocalAddr().(*net.UDPAddr)
-	if !ok || addr.IP == nil {
-		return nil, fmt.Errorf("nao foi possivel ler o IP da interface de saida")
-	}
-	return addr.IP, nil
-}
-
-func ipFromCIDR(raw string) net.IP {
-	if ip := net.ParseIP(raw); ip != nil {
-		return ip
-	}
-	ip, _, err := net.ParseCIDR(raw)
-	if err != nil {
-		return nil
-	}
-	return ip
+	return peers
 }

@@ -44,6 +44,8 @@ func main() {
 	registerDashboardRoutes(mux, worker, admin)
 	registerHotspotRoutes(mux, worker, admin, audit)
 	registerDNSRoutes(mux, worker, admin, audit)
+	registerDNSRouteRoutes(mux, admin, db, audit)
+	registerDNSPeerRoutes(mux, admin, db)
 	registerCertificateRoutes(mux, admin, db, ca, audit)
 	registerNginxUIRoutes(mux, admin)
 

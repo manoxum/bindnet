@@ -51,6 +51,11 @@ func registerDNSRoutes(mux *http.ServeMux, worker *workerClient, admin *administ
 		_ = worker.streamLogs(r.Context(), w, "dns-provider", r.URL.Query().Get("follow") == "true")
 	}))
 
+	mux.HandleFunc("GET /api/dns/discovered-servers", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(discoveredServersFromNginx(getenv("NGINX_CONFIG_PATH", nginxConfigPath)))
+	}))
+
 	mux.HandleFunc("POST /api/dns/test", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Hostname string `json:"hostname"`

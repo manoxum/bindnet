@@ -10,12 +10,21 @@ package main
 import (
 	"context"
 	"log"
-	"net"
 	"os"
 	"time"
 
 	"github.com/miekg/dns"
 )
+
+// hostname devolve o hostname do container, usado como valor padrao de
+// DISCOVER_NODE_NAME quando a variavel nao e definida.
+func hostname() string {
+	name, err := os.Hostname()
+	if err != nil || name == "" {
+		return "no-desconhecido"
+	}
+	return name
+}
 
 func main() {
 	log.SetFlags(log.LstdFlags)
@@ -25,19 +34,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("[dns-provider] %v", err)
 	}
-	log.Printf("[dns-provider] TLDs locais resolvidos: %v", tldNames(tlds))
+	log.Printf("[dns-provider] TLDs locais resolvidos: %v", zoneNames(tlds))
 
-	discoverDomains, err := parseOptionalTLDs(os.Getenv("DOMAINS"), "DOMAINS")
+	domainZones, err := parseOptionalDomains(os.Getenv("DOMAINS"), "DOMAINS")
 	if err != nil {
 		log.Fatalf("[dns-provider] %v", err)
 	}
-	discoverIP := net.IP(nil)
-	if len(discoverDomains) > 0 {
-		discoverIP, err = instanceIP()
-		if err != nil {
-			log.Fatalf("[dns-provider] erro ao configurar discover mode: %v", err)
-		}
-		log.Printf("[dns-provider] TLDs discover resolvidos: %v -> %s", tldNames(discoverDomains), discoverIP)
+	if len(domainZones) > 0 {
+		log.Printf("[dns-provider] zonas declaradas em DOMAINS: %v", zoneNames(domainZones))
+	}
+	nginxNames := loadNginxNames(getenv("NGINX_CONFIG_PATH", "/nginx-config"))
+	if len(nginxNames.hosts) > 0 || len(nginxNames.zones) > 0 {
+		log.Printf("[dns-provider] server_name do nginx-ui descobertos: hosts=%v zonas=%v", zoneNames(nginxNames.hosts), zoneNames(nginxNames.zones))
 	}
 
 	dockerGateway := os.Getenv("DOCKER_HOST_GATEWAY")
@@ -74,14 +82,43 @@ func main() {
 	}
 	hydrateCancel()
 
+	nodeName := getenv("DISCOVER_NODE_NAME", hostname())
+	peers := parsePeers(os.Getenv("DISCOVER_PEERS"))
+	discoverPort := getenv("DISCOVER_PORT", "8531")
+
+	routes := newRouteTable()
+	routesCtx, routesCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if loaded, err := loadAllRoutes(routesCtx, db); err != nil {
+		log.Printf("[dns-provider] aviso: falha ao carregar tabela de descoberta do Postgres: %v", err)
+	} else {
+		routes.replace(loaded)
+	}
+	routesCancel()
+
 	cfg := &dnsConfig{
-		tlds:            tlds,
-		discoverDomains: discoverDomains,
-		discoverIP:      discoverIP,
-		dockerGateway:   dockerGateway,
-		hotspotGateway:  hotspotGateway,
-		db:              db,
-		cache:           cache,
+		tlds:           tlds,
+		domainZones:    domainZones,
+		nginxHosts:     nginxNames.hosts,
+		nginxZones:     nginxNames.zones,
+		dockerGateway:  dockerGateway,
+		hotspotGateway: hotspotGateway,
+		db:             db,
+		cache:          cache,
+		routes:         routes,
+		nodeName:       nodeName,
+		peers:          peers,
+		discovered:     newPeerRegistry(),
+	}
+	log.Printf("[dns-provider] no de descoberta '%s', peers configurados: %v", nodeName, peers)
+
+	go startDiscoverServer(cfg, discoverPort)
+	go pollPeers(cfg)
+	if len(domainZones) > 0 {
+		// Anuncio/escuta multicast so fazem sentido com o discover mode
+		// ligado (DOMAINS nao vazio) - mesma condicao que já liga o resto
+		// da malha.
+		go announcePeer(cfg, discoverPort)
+		go listenForPeers(cfg, discoverPort)
 	}
 
 	errCh := make(chan error, 2)

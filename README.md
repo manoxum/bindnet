@@ -56,8 +56,12 @@ arquivos provisionado para uso futuro (MinIO).
 - **dns-provider** (`services/worker/dns/`) — servidor DNS Go próprio
   (não usa CoreDNS): resolve TLDs locais (`DNS_LOCAL_TLDS`) de forma
   diferente conforme quem pergunta (host/container/hotspot, ver
-  [RULE.md](RULE.md)), resolve TLDs de discover (`DOMAINS`) para o IP
-  LAN desta instância e encaminha o resto para DNS público.
+  [RULE.md](RULE.md)), usa `server_name` declarados no nginx-ui como
+  anúncios locais, e trata zonas de discover (`DOMAINS`) como uma
+  malha de roteamento por próximo salto entre servidores Bindnet
+  vizinhos (`DISCOVER_PEERS`): domínio local resolve normalmente,
+  domínio remoto conhecido é encaminhado (proxy real) para o próximo
+  salto, e o resto é encaminhado para DNS público.
 - **nginx-ui** — interface de administração para configurar sites,
   acessível só pela porta administrativa `:9080` (nada mais faz proxy
   público nas portas 80/443 neste stack). Não recebe
@@ -103,17 +107,18 @@ arquivos provisionado para uso futuro (MinIO).
 
 ## Configuração inicial
 
-1. Copie o template de variáveis de ambiente e ajuste para a sua
-   máquina (interfaces de rede, SSID, senha, etc.):
+1. Ajuste o arquivo de ambiente principal para a sua máquina
+   (interfaces de rede, SSID, senha, etc.):
 
    ```bash
-   cp .env.example .env
-   $EDITOR .env
+   cp .env.example .env.main
+   $EDITOR .env.main
    ```
 
    Veja os comentários em [.env.example](.env.example) para o
    significado, obrigatoriedade e valor padrão de cada variável.
-   **`.env` nunca deve ser commitado** (já está no `.gitignore`).
+   O fluxo oficial usa `promote.yml` + `.env.main`; `.env` continua
+   reservado como fallback local/legado e não deve ser commitado.
 
 2. Os volumes Docker do stack (`nginx_config`,
    `nginx_ui_data`, `www_data`, `cert_proxy_data`,
@@ -195,7 +200,7 @@ Resumo das mais relevantes:
 | Variável | Obrigatória | Padrão | Descrição |
 |---|---|---|---|
 | `WIFI_INTERFACE` | sim | — | interface Wi-Fi física que vira o AP |
-| `INTERNET_INTERFACE` | sim | — | interface com saída para a internet |
+| `INTERNET_INTERFACE` | sim | — | interface com saída para a internet, ou `auto` (rota padrão do host); pode ser igual a `WIFI_INTERFACE` se a placa suportar AP+STA concorrente |
 | `WIFI_SSID` | sim | — | nome da rede Wi-Fi criada |
 | `WIFI_PASSWORD` | sim | — | senha WPA2 da rede |
 | `WIFI_COUNTRY` | não | `ST` | código regulatório de país |
@@ -205,7 +210,10 @@ Resumo das mais relevantes:
 | `HOTSPOT_GATEWAY` | não | `192.168.12.1` | IP do hotspot na rede local |
 | `DOCKER_HOST_GATEWAY` | não | — | IP do host visto pelos containers (bind extra do DNS) |
 | `DNS_LOCAL_TLDS` | não | `local,test,example` | TLDs resolvidos como locais pelo `dns-provider` |
-| `DOMAINS` | não | vazio | TLDs do discover mode, resolvidos para o IP LAN desta instância |
+| `DOMAINS` | não | vazio | TLDs/zonas que participam do discover mode por próximo salto |
+| `DISCOVER_PEERS` | não | vazio | servidores Bindnet vizinhos diretos (`host:porta`) para troca de rotas |
+| `DISCOVER_NODE_NAME` | não | hostname do container | nome deste servidor na malha de descoberta |
+| `DISCOVER_PORT` | não | `8531` | porta HTTP onde este nó expõe sua tabela de rotas aos peers |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | sim (criação/atualização) | — | credenciais do painel web |
 | `BACKEND_PORT` | não | `8090` | porta da API do painel (`backend`) |
 | `FRONTEND_PORT` | não | `9090` | porta da interface web do painel (`frontend`) |
@@ -242,12 +250,43 @@ manual é necessária, e os dispositivos que já confiam na CA antiga
 continuam funcionando sem precisar reimportar nada (veja
 [RULE.md](RULE.md#gestão-de-certificados-servicesbackendcertificadosgo)).
 
+## Operação
+
+O entrypoint operacional do repo é o mesmo padrão usado no FlowKey:
+`Makefile` delega para o submódulo `bin/promote`, e `promote.yml`
+define estágio atual, arquivos Compose, volumes/overlays de dev e
+segredos declarados.
+
+Comandos principais:
+
+```bash
+make dev        # bin/promote dev
+make run-local  # service + assets.ports
+make run-infra
+make run-service
+make stop-all
+make dist       # resolve includes para deployment/
+```
+
+O compose é dividido em camadas:
+
+- `docker-compose.infra.yml`: nginx-ui, Postgres, Mongo, MinIO e Redis.
+- `docker-compose.services.yml`: migration, dns-provider, hotspot, worker, backend e frontend.
+- `docker-compose.assets.build.yml`: contextos de build dos serviços próprios.
+- `docker-compose.assets.ports.yml`: portas locais (`NGINX_UI_PORT`, `BACKEND_PORT`, `FRONTEND_PORT`).
+- `docker-compose.deploy.yml`: agregador de infra + services.
+- `docker-compose.yml`: agregador principal usado por `bin/promote`.
+
 ## Estrutura do repositório
 
 ```
-docker-compose.yml    # orquestra todos os serviços
-.env.example           # template documentado de variáveis (versionado)
-.env                    # valores reais da máquina (git-ignored, não versionar)
+bin/                    # submodulo docker-cli; fornece bin/promote
+promote.yml             # configuracao operacional do bin/promote
+Makefile                # atalhos oficiais para bin/promote
+docker-compose*.yml     # camadas Compose (infra/services/assets/deploy)
+.env.example            # template documentado de variáveis (versionado)
+.env.main               # ambiente principal usado por promote.yml/current_stage
+scripts/                # utilitarios especificos do Bindnet
 services/
   frontend/               # React (Vite) - UI do painel de gestão, container próprio
   backend/                # Go - API pública do painel (auth, hotspot/DNS, certificados)
@@ -257,12 +296,12 @@ services/
     hotspot/                # Dockerfile + entrypoint.sh do serviço "hotspot" (create_ap)
     dns/                    # Go - servidor DNS split-horizon proprio do "dns-provider" (sem CoreDNS)
 RULE.md                   # regras de negócio de cada serviço
-CLAUDE.md                  # diretrizes para o Claude Code neste repo
 CLAUDE.md                   # diretrizes para ferramentas de IA neste repo
 ```
 
 `postgres`, `mongo` e `minio` são imagens oficiais configuradas só no
-`docker-compose.yml`/`.env` — não têm pasta própria em `services/`.
+`docker-compose.infra.yml`/`.env.main` — não têm pasta própria em
+`services/`.
 
 ## Troubleshooting
 
@@ -279,23 +318,18 @@ CLAUDE.md                   # diretrizes para ferramentas de IA neste repo
   (ex: `systemd-resolved` com drop-in dedicado).
 - **Domínio local não resolve dentro de containers de outros projetos**:
   configure o Docker daemon para usar o DNS do `bindnet` como upstream:
-  `sudo bin/configure-docker-dns.sh` e depois reinicie o Docker. Sem
+  `sudo scripts/configure-docker-dns.sh` e depois reinicie o Docker. Sem
   isso, o DNS embutido do Docker (`127.0.0.11`) encaminha para o
   resolver do host e recebe a resposta da view host (`127.x.y.z`) em
   vez da view container (`DOCKER_HOST_GATEWAY`).
-- **Erro "external volume not found"**: os volumes do `nginx-ui`/
-  painel de gestão (incluindo `postgres_data`,
-  `mongo_data`, `minio_data`) precisam ser criados
-  manualmente antes do primeiro `docker compose up` (veja "Configuração
-  inicial" acima).
 - **`backend` não sobe / erro "ADMIN_USERNAME e ADMIN_PASSWORD são
-  obrigatórios"**: defina essas variáveis no `.env` para criar o
+  obrigatórios"**: defina essas variáveis no `.env.main` para criar o
   primeiro usuário administrador. Depois disso, manter ambas definidas
-  faz o backend sincronizar o login com o `.env` a cada boot; deixar
+  faz o backend sincronizar o login com o env principal a cada boot; deixar
   ambas vazias reaproveita o `/data/admin.json` já persistido.
 - **`backend` não sobe / erro ao conectar no Postgres ou Mongo**:
   confirme que `POSTGRES_PASSWORD`/`MONGO_PASSWORD` estão definidos no
-  `.env` e que os containers `postgres`/`mongo` estão rodando e
+  `.env.main` e que os containers `postgres`/`mongo` estão rodando e
   saudáveis (`docker compose ps`); o `backend` só sobe depois do
   `migration` terminar com sucesso, então também vale checar
   `docker compose logs migration`.

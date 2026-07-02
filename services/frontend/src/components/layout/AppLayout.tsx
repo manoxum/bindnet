@@ -1,8 +1,9 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, Wifi, Globe, ShieldCheck, LogOut } from "lucide-react";
+import { LayoutDashboard, Wifi, Globe, ShieldCheck, LogOut, Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useLogout, useSession } from "@/hooks/useAuth";
+import { useTheme } from "@/hooks/useTheme";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
@@ -14,6 +15,7 @@ const navItems = [
 export function AppLayout() {
   const { data: session } = useSession();
   const logout = useLogout();
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <div className="flex min-h-screen bg-muted/30">
@@ -44,6 +46,14 @@ export function AppLayout() {
           <span className="text-sm text-muted-foreground">Painel de gestão da rede</span>
           <div className="flex items-center gap-3">
             {session?.username && <span className="text-sm">{session.username}</span>}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleTheme}
+              aria-label={theme === "dark" ? "Ativar tema claro" : "Ativar tema escuro"}
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => logout.mutate()}>
               <LogOut className="mr-2 h-4 w-4" />
               Sair

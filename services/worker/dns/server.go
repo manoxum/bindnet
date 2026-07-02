@@ -28,13 +28,18 @@ const (
 var upstreamServers = []string{"8.8.8.8:53", "1.1.1.1:53"}
 
 type dnsConfig struct {
-	tlds            map[string]bool
-	discoverDomains map[string]bool
-	discoverIP      net.IP
-	dockerGateway   string
-	hotspotGateway  string
-	db              *sql.DB
-	cache           *redis.Client
+	tlds           map[string]bool
+	domainZones    map[string]bool
+	nginxHosts     map[string]bool
+	nginxZones     map[string]bool
+	dockerGateway  string
+	hotspotGateway string
+	db             *sql.DB
+	cache          *redis.Client
+	routes         *routeTable
+	nodeName       string
+	peers          []string
+	discovered     *peerRegistry
 }
 
 // newHandler devolve o handler dns.HandlerFunc para uma view especifica -
@@ -44,15 +49,25 @@ type dnsConfig struct {
 func newHandler(cfg *dnsConfig, v view) dns.HandlerFunc {
 	return func(w dns.ResponseWriter, r *dns.Msg) {
 		if len(r.Question) != 1 {
-			forward(w, r)
+			forwardVia(w, r, upstreamServers)
 			return
 		}
 		question := r.Question[0]
 		name := strings.ToLower(question.Name)
 
-		zone, kind := zoneFor(name, cfg)
-		if kind == zoneNone {
-			forward(w, r)
+		zone, kind, nextHop := zoneFor(name, cfg)
+		switch kind {
+		case zoneNone:
+			forwardVia(w, r, upstreamServers)
+			return
+		case zoneMeshUnknown:
+			msg := new(dns.Msg)
+			msg.SetReply(r)
+			msg.Rcode = dns.RcodeNameError
+			_ = w.WriteMsg(msg)
+			return
+		case zoneRemote:
+			forwardVia(w, r, []string{dnsUpstreamForNextHop(nextHop)})
 			return
 		}
 
@@ -95,13 +110,23 @@ func newHandler(cfg *dnsConfig, v view) dns.HandlerFunc {
 	}
 }
 
-// forward encaminha qualquer consulta fora dos TLDs locais para os
-// resolvedores publicos - mesmo comportamento do antigo "forward . 8.8.8.8
-// 1.1.1.1" do Corefile.
-func forward(w dns.ResponseWriter, r *dns.Msg) {
+func dnsUpstreamForNextHop(nextHop string) string {
+	if host, _, err := net.SplitHostPort(nextHop); err == nil {
+		return net.JoinHostPort(host, "53")
+	}
+	return net.JoinHostPort(nextHop, "53")
+}
+
+// forwardVia encaminha a consulta para a lista de upstreams informada,
+// usando o primeiro que responder - mesmo comportamento do antigo
+// "forward . 8.8.8.8 1.1.1.1" do Corefile quando upstreams e
+// upstreamServers (nomes fora de qualquer zona conhecida), ou um proxy
+// de um unico salto quando upstreams e o proximo salto da malha
+// (zoneRemote, ver zones.go).
+func forwardVia(w dns.ResponseWriter, r *dns.Msg, upstreams []string) {
 	client := &dns.Client{Timeout: 3 * time.Second}
 	var lastErr error
-	for _, upstream := range upstreamServers {
+	for _, upstream := range upstreams {
 		resp, _, err := client.Exchange(r, upstream)
 		if err != nil {
 			lastErr = err
@@ -115,7 +140,7 @@ func forward(w dns.ResponseWriter, r *dns.Msg) {
 	msg.Rcode = dns.RcodeServerFailure
 	_ = w.WriteMsg(msg)
 	if lastErr != nil {
-		log.Printf("[dns-provider] erro ao encaminhar consulta upstream: %v", lastErr)
+		log.Printf("[dns-provider] erro ao encaminhar consulta para %v: %v", upstreams, lastErr)
 	}
 }
 

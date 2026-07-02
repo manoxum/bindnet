@@ -1,0 +1,33 @@
+include:
+  - docker-compose.services.yml
+
+services:
+  migration:
+    build:
+      context: ./services/migration
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+
+  dns-provider:
+    build:
+      context: ./services/worker/dns
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+
+  hotspot:
+    build:
+      context: ./services/worker/hotspot
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+
+  worker:
+    build:
+      context: ./services/worker/controller
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+
+  backend:
+    build:
+      context: ./services/backend
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+
+  frontend:
+    build:
+      context: ./services/frontend
+      dockerfile: ${DOCKERFILE:-Dockerfile}

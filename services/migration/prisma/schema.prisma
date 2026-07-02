@@ -75,3 +75,41 @@ model LocalDnsRecord {
 
   @@map("local_dns_records")
 }
+
+// Tabela de rotas da malha de discover mode (roteamento por proximo
+// salto), mantida pelo dns-provider (services/worker/dns/discover_db.go)
+// a partir da troca periodica com os peers configurados em
+// DISCOVER_PEERS. "owner" e o DISCOVER_NODE_NAME do dono final do
+// dominio; "nextHop" e o endereco do vizinho direto para onde este no
+// deve encaminhar a consulta; "distance" e o numero de saltos ate o
+// dono. Sem Redis: o caminho quente de resolucao DNS le de um
+// snapshot em memoria, nao desta tabela - ver RULE.md.
+model DiscoverRoute {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  domain     String   @unique
+  owner      String
+  nextHop    String   @map("next_hop")
+  distance   Int
+  source     String
+  state      String   @default("ok")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("discover_routes")
+}
+
+// Servidores Bindnet vizinhos encontrados automaticamente por
+// broadcast UDP na mesma rede local (services/worker/dns/discover_broadcast.go),
+// alem dos configurados manualmente em DISCOVER_PEERS (esses nao
+// aparecem aqui, so os auto-descobertos - servem para o operador ver
+// quem mais existe na rede antes de decidir configurar como peer).
+model DiscoverPeer {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  address    String   @unique
+  nodeName   String   @map("node_name")
+  source     String   @default("broadcast")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("discover_peers")
+}

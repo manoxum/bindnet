@@ -1,0 +1,126 @@
+include:
+  - docker-compose.infra.yml
+
+services:
+  migration:
+    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-migration-${STAGE:-main}-${VERSION:-latest}
+    restart: "no"
+    environment:
+      TZ: ${TZ:-Africa/Sao_Tome}
+      DATABASE_URL: postgres://${POSTGRES_USER:-bindnet}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bindnet}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - proxy
+
+  dns-provider:
+    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-dns-provider-${STAGE:-main}-${VERSION:-latest}
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ${BINDNET_ENV_FILE:-.env.main}
+    environment:
+      POSTGRES_HOST: 10.91.0.10
+      REDIS_HOST: 10.91.0.11
+      NGINX_CONFIG_PATH: /nginx-config
+    volumes:
+      - nginx_config:/nginx-config:ro
+    depends_on:
+      hotspot:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+
+  hotspot:
+    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-hotspot-${STAGE:-main}-${VERSION:-latest}
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    env_file:
+      - ${BINDNET_ENV_FILE:-.env.main}
+
+  worker:
+    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-worker-${STAGE:-main}-${VERSION:-latest}
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ${BINDNET_ENV_FILE:-.env.main}
+    environment:
+      BINDNET_ENV_PATH: /workspace/${BINDNET_ENV_FILE:-.env.main}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /run/dbus:/run/dbus
+      - /etc/NetworkManager/conf.d:/etc/NetworkManager/conf.d
+      - worker_ipc:/run/bindnet-admin
+      - ./:/workspace
+
+  backend:
+    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-backend-${STAGE:-main}-${VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Africa/Sao_Tome}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      BACKEND_PORT: ${BACKEND_PORT:-8090}
+      POSTGRES_USER: ${POSTGRES_USER:-bindnet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-bindnet}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MONGO_USER: ${MONGO_USER:-bindnet}
+      MONGO_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_DB: ${MONGO_DB:-bindnet}
+      MONGO_HOST: mongo
+      MONGO_PORT: "27017"
+      CA_COMMON_NAME: ${CA_COMMON_NAME:-Bindnet Local Development CA}
+      NGINX_UI_URL: ${NGINX_UI_URL:-http://nginx-ui:9000}
+      NGINX_UI_USERNAME: ${NGINX_UI_USERNAME:-}
+      NGINX_UI_PASSWORD: ${NGINX_UI_PASSWORD:-}
+    expose:
+      - "8090"
+    volumes:
+      - admin_data:/data
+      - cert_proxy_data:/certproxy-data:ro
+      - nginx_ui_data:/nginx-ui-data:ro
+      - nginx_config:/nginx-config:ro
+      - worker_ipc:/run/bindnet-admin
+    depends_on:
+      worker:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_started
+      migration:
+        condition: service_completed_successfully
+    networks:
+      - proxy
+
+  frontend:
+    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-frontend-${STAGE:-main}-${VERSION:-latest}
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - backend
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.91.0.0/24
+
+volumes:
+  nginx_config:
+  nginx_ui_data:
+  cert_proxy_data:
+  admin_data:
+  worker_ipc:

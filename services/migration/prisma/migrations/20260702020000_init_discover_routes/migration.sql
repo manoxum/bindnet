@@ -1,0 +1,16 @@
+-- Migration idempotente (mesmo padrao de 20260702010000_init_local_dns_records):
+-- CREATE TABLE sem colunas, toda coluna via ALTER TABLE ADD COLUMN IF NOT
+-- EXISTS, indices via CREATE INDEX IF NOT EXISTS.
+
+-- CreateTable
+CREATE TABLE IF NOT EXISTS "discover_routes" ();
+
+ALTER TABLE "discover_routes" ADD COLUMN IF NOT EXISTS "id" UUID PRIMARY KEY DEFAULT gen_random_uuid();
+ALTER TABLE "discover_routes" ADD COLUMN IF NOT EXISTS "domain" TEXT NOT NULL UNIQUE;
+ALTER TABLE "discover_routes" ADD COLUMN IF NOT EXISTS "owner" TEXT NOT NULL;
+ALTER TABLE "discover_routes" ADD COLUMN IF NOT EXISTS "next_hop" TEXT NOT NULL;
+ALTER TABLE "discover_routes" ADD COLUMN IF NOT EXISTS "distance" INTEGER NOT NULL;
+ALTER TABLE "discover_routes" ADD COLUMN IF NOT EXISTS "source" TEXT NOT NULL;
+ALTER TABLE "discover_routes" ADD COLUMN IF NOT EXISTS "state" TEXT NOT NULL DEFAULT 'ok';
+ALTER TABLE "discover_routes" ADD COLUMN IF NOT EXISTS "last_seen_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE "discover_routes" ADD COLUMN IF NOT EXISTS "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;

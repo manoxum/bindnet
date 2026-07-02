@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { InstallCaCard } from "@/components/InstallCaCard";
 import { api, ApiError } from "@/lib/api";
 
 interface Certificate {
@@ -80,6 +81,8 @@ export function CertificatesPage() {
           </a>
         </CardContent>
       </Card>
+
+      <InstallCaCard />
 
       <Card>
         <CardHeader>

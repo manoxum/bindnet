@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
-// envPath e o .env compartilhado do repositorio, montado em
-// /workspace (raiz do repo) dentro do container do worker.
-const envPath = "/workspace/.env"
+// defaultEnvPath e o env compartilhado do repositorio, montado em
+// /workspace (raiz do repo) dentro do container do worker. O fluxo
+// promote usa .env.main; .env fica como fallback para instalacoes
+// antigas ainda nao migradas.
+const defaultEnvPath = "/workspace/.env.main"
 
 // envSections restringe quais chaves cada "section" pode ler/alterar - o
 // backend nunca manda uma chave arbitraria, so uma dessas secoes.
@@ -21,7 +24,7 @@ var envSections = map[string][]string{
 		"WIFI_COUNTRY", "WIFI_CHANNEL", "WIFI_FREQ_BAND", "WIFI_CHANNEL_CANDIDATES",
 		"HOTSPOT_GATEWAY", "HOTSPOT_CIDR",
 	},
-	"dns": {"DNS_LOCAL_TLDS"},
+	"dns": {"DNS_LOCAL_TLDS", "DOMAINS", "DISCOVER_PEERS", "DISCOVER_NODE_NAME", "DISCOVER_PORT"},
 }
 
 func registerEnvRoutes(mux *http.ServeMux) {
@@ -36,7 +39,8 @@ func handleEnvGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "secao invalida", http.StatusBadRequest)
 		return
 	}
-	values, err := readEnvValues(envPath, keys)
+	path := envPath()
+	values, err := readEnvValues(path, keys)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -70,11 +74,22 @@ func handleEnvPatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := updateEnvKeys(envPath, values); err != nil {
+	path := envPath()
+	if err := updateEnvKeys(path, values); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func envPath() string {
+	if explicit := os.Getenv("BINDNET_ENV_PATH"); explicit != "" {
+		return explicit
+	}
+	if _, err := os.Stat(defaultEnvPath); err == nil {
+		return defaultEnvPath
+	}
+	return filepath.Join("/workspace", ".env")
 }
 
 // readEnvValues le o .env e devolve so as chaves pedidas.

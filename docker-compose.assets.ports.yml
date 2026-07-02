@@ -1,0 +1,12 @@
+services:
+  nginx-ui:
+    ports:
+      - "${NGINX_UI_PORT:-9080}:9000"
+
+  backend:
+    ports:
+      - "${BACKEND_PORT:-8090}:8090"
+
+  frontend:
+    ports:
+      - "${FRONTEND_PORT:-9090}:80"

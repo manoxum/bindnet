@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/miekg/dns"
@@ -13,34 +14,57 @@ type zoneKind int
 const (
 	zoneNone zoneKind = iota
 	zoneLocal
-	zoneDiscover
+	zoneRemote      // dono e outro no da malha, rota conhecida -> proxy pro proximo salto
+	zoneMeshUnknown // dentro de DOMAINS, mas sem dono local nem rota -> NXDOMAIN
 )
 
-func zoneFor(fqdn string, cfg *dnsConfig) (string, zoneKind) {
+// zoneFor decide como resolver um nome. Alem da zona/tipo, devolve o
+// proximo salto quando kind == zoneRemote - so nesse caso o valor e
+// significativo.
+func zoneFor(fqdn string, cfg *dnsConfig) (zone string, kind zoneKind, nextHop string) {
 	labels := dns.SplitDomainName(fqdn)
 	if len(labels) == 0 {
-		return fqdn, zoneNone
+		return fqdn, zoneNone, ""
+	}
+
+	name := strings.Join(labels, ".")
+	if cfg.nginxHosts[name] {
+		return name + ".", zoneLocal, ""
+	}
+	if zone, ok := suffixZoneFor(labels, cfg.nginxZones); ok {
+		return zone + ".", zoneLocal, ""
+	}
+	if zone, ok := suffixZoneFor(labels, cfg.domainZones); ok {
+		if route, ok := cfg.routes.lookup(zone); ok {
+			if route.NextHop != "" {
+				return zone + ".", zoneRemote, route.NextHop
+			}
+		}
+		return zone + ".", zoneMeshUnknown, ""
 	}
 
 	tld := labels[len(labels)-1]
-	zone := tld + "."
-	if cfg.discoverDomains[tld] {
-		return zone, zoneDiscover
-	}
+	zoneName := tld + "."
 	if cfg.tlds[tld] {
-		return zone, zoneLocal
+		return zoneName, zoneLocal, ""
 	}
-	return zone, zoneNone
+	return zoneName, zoneNone, ""
 }
 
-// answerIPFor resolve o IP de resposta conforme o tipo de zona. Zonas
-// discover sempre apontam para o IP LAN desta instancia; zonas locais
-// continuam usando split-horizon por view.
-func answerIPFor(cfg *dnsConfig, v view, kind zoneKind, name string) (net.IP, error) {
-	if kind == zoneDiscover {
-		return cfg.discoverIP, nil
+func suffixZoneFor(labels []string, domains map[string]bool) (string, bool) {
+	for i := 0; i < len(labels); i++ {
+		zone := strings.Join(labels[i:], ".")
+		if domains[zone] {
+			return zone, true
+		}
 	}
+	return "", false
+}
 
+// answerIPFor resolve o IP de resposta conforme a view: container/hotspot
+// sao sempre o gateway daquela view; host usa loopback persistente por
+// hostname.
+func answerIPFor(cfg *dnsConfig, v view, kind zoneKind, name string) (net.IP, error) {
 	switch v {
 	case viewContainer:
 		return net.ParseIP(cfg.dockerGateway), nil

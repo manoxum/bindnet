@@ -8,6 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { LogsPanel } from "@/components/LogsPanel";
+import { DiscoveredServersCard } from "@/components/DiscoveredServersCard";
+import { DiscoveredBindnetPeersCard } from "@/components/DiscoveredBindnetPeersCard";
+import { DiscoverRoutesCard } from "@/components/DiscoverRoutesCard";
+import { DiscoverMeshConfigCard } from "@/components/DiscoverMeshConfigCard";
 import { api, ApiError } from "@/lib/api";
 
 interface TestResponse {
@@ -133,6 +137,14 @@ export function DnsPage() {
           )}
         </CardContent>
       </Card>
+
+      <DiscoverMeshConfigCard />
+
+      <DiscoveredServersCard />
+
+      <DiscoveredBindnetPeersCard />
+
+      <DiscoverRoutesCard />
 
       <LogsPanel title="Logs do DNS" path="/dns/logs" />
     </div>

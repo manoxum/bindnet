@@ -86,6 +86,25 @@ Regras:
     suportar 5GHz ou se a detecção falhar (com aviso no log). Essa é só
     a banda **preferida** para a primeira tentativa — ver fallback de
     banda acima para o que acontece se nenhum canal dela funcionar.
+- **`INTERNET_INTERFACE`** aceita o nome de uma interface fixa ou
+  `auto`: nesse caso o hotspot detecta a interface da rota padrão
+  IPv4 do host (`ip route show default`) e falha explicitamente se
+  nenhuma rota padrão existir — mesma filosofia de nunca adivinhar
+  silenciosamente já usada para canal/banda (`auto` só age quando o
+  valor é explicitamente esse; a variável continua obrigatória e sem
+  fallback quando ausente). `INTERNET_INTERFACE` pode ser a **mesma**
+  interface de `WIFI_INTERFACE` (hotspot e saída de internet pela
+  mesma placa física, modo AP+STA concorrente no mesmo rádio) — o
+  hotspot detecta esse caso e loga um aviso citando se `iw phy<N>
+  info` reporta suporte a combinações `AP`+`managed` simultâneas, mas
+  **nunca bloqueia**: quem decide se funciona de fato é o próprio
+  `create_ap`, exatamente como no retry de canal.
+- O painel filtra do seletor de `INTERNET_INTERFACE` (e de
+  `WIFI_INTERFACE`) qualquer interface virtual que nunca é uma saída de
+  internet real (`docker*`, `br-*` gerada pelo Docker, `veth*`,
+  `virbr*`, `tun*`, `tap*`, `wg*`, `ap0` — a virtual que o próprio
+  `create_ap` cria) — `GET /network/interfaces` (worker) já devolve
+  só interfaces físicas/relevantes.
 - O hotspot exige que o binário `create_ap` baixado suporte
   `--no-dns` e `--dhcp-dns`; sem isso, falha explicitamente em vez de
   criar um AP com comportamento de DNS inesperado.
@@ -152,15 +171,87 @@ Regras:
   `local,test,example`). Cada TLD é validado (`[a-z0-9-]`, sem começar
   ou terminar com `-`); TLD inválido é erro fatal. Duplicatas são
   ignoradas silenciosamente.
-- `DOMAINS` define os TLDs do **discover mode** (ex.: `discover`).
-  Para esses TLDs, qualquer consulta `A` (ex.: `painel.discover`,
-  `qualquer-nome.discover`) responde com o IP LAN desta instância,
-  igual em todas as views. O IP vem de `HOST_SOURCE_CIDR` sem o CIDR
-  (ex.: `10.234.2.102/32` → `10.234.2.102`); se
-  `HOST_SOURCE_CIDR` estiver vazio, o dns-provider detecta o IP pela
-  rota padrão de saída. `DOMAINS` vazio desliga o discover mode. Use
-  TLDs diferentes dos de `DNS_LOCAL_TLDS`, porque discover tem
-  precedência quando houver sobreposição.
+- `DOMAINS` define as zonas que participam do **discover mode** (ex.:
+  `discover`, `costa.dev`, `*.costa.dev`). Essas zonas não significam
+  "sempre responder com o IP desta máquina": elas delimitam quais
+  nomes podem ser resolvidos/roteados pela malha de servidores
+  Bindnet. `DOMAINS` vazio desliga o discover mode.
+- `server_name` declarados no nginx-ui são tratados como anúncios de
+  serviços locais deste nó. O `dns-provider` descobre esses nomes a
+  partir do volume `nginx_config` montado somente leitura. Nomes exatos
+  (ex.: `app.costa.dev`) anunciam só aquele host; wildcards (ex.:
+  `*.costa.dev`) anunciam uma zona inteira. Entradas `_`, regex e
+  variáveis do Nginx são ignoradas.
+- Quando a consulta é para um nome de `DOMAINS` que este nó possui
+  localmente (por `server_name` ou por outra fonte local equivalente),
+  a resposta segue a mesma resolução local split-horizon dos TLDs de
+  `DNS_LOCAL_TLDS`: host recebe loopback persistente, containers
+  recebem `DOCKER_HOST_GATEWAY` e clientes do hotspot recebem
+  `HOTSPOT_GATEWAY`.
+- Quando a consulta é para um nome de `DOMAINS` pertencente a outro
+  servidor descoberto, o Bindnet funciona como um **roteador de
+  descoberta**: o nó local responde encaminhando (proxy real da
+  consulta, não uma resposta fixa) para o próximo salto conhecido, não
+  necessariamente para o servidor final. Exemplo: se a topologia é
+  `A <-> B <-> C <-> D`, com `a.dev`, `b.dev`, `c.dev`, `d.dev`
+  (`DOMAINS=dev` em todos os quatro), então:
+  - no servidor A, uma consulta para `b.dev` é encaminhada para B,
+    porque B é o dono direto desse domínio;
+  - no servidor A, consultas para `c.dev` ou `d.dev` também são
+    encaminhadas para B, porque B é o próximo salto conhecido para
+    alcançar C ou D;
+  - no servidor B, `c.dev` segue para C e `d.dev` também segue para C,
+    que então entrega a D.
+- **Como os nós se conhecem**: dois mecanismos complementares.
+  - **Auto-descoberta na mesma rede local**
+    (`discover_broadcast.go`): com o discover mode ligado (`DOMAINS`
+    não vazio), cada nó publica a cada 10s um anúncio (seu
+    `DISCOVER_NODE_NAME` e `DISCOVER_PORT`) num grupo multicast
+    (`239.255.42.99`, escopo organizacional — não atravessa
+    roteadores) e escuta o mesmo grupo para achar outros. Qualquer nó
+    visto há menos de ~30s entra automaticamente na lista de peers
+    consultados por `pollPeers`, sem ação do operador; a lista completa
+    fica persistida em `discover_peers` só para o painel mostrar (`GET
+    /api/dns/peers`, card "Servidores Bindnet na rede").
+  - **Configuração manual** (`DISCOVER_PEERS`): necessária para
+    vizinhos fora da rede local, já que multicast não atravessa
+    roteadores — endereços `host:porta` do `DISCOVER_PORT` de cada
+    vizinho.
+  - Nos dois casos, a troca de fato acontece do mesmo jeito: o
+    `dns-provider` sobe um endpoint HTTP próprio
+    (`GET /discover/routes`, porta `DISCOVER_PORT`, padrão `8531`) e
+    uma goroutine que consulta cada peer (manual + auto-descoberto) a
+    cada 15 segundos, implementando um vetor de distância simples
+    (estilo RIP):
+  - cada nó anuncia, com distância 0, os nomes que ele mesmo possui
+    localmente (`server_name` do nginx-ui) que também caem dentro de
+    algum `DOMAINS` seu (chamado de "dono": `DISCOVER_NODE_NAME`,
+    padrão o hostname do container);
+  - ao aprender uma rota de um peer, a distância local é
+    `distância_anunciada + 1`; rotas com distância acima de 16 saltos
+    são descartadas (limite de segurança contra contagem-ao-infinito);
+  - o endpoint de descoberta nunca devolve a um peer uma rota que só
+    existe porque foi aprendida dele mesmo (split-horizon, baseado no
+    IP de origem da requisição HTTP) e um nó nunca aprende de volta uma
+    rota para um domínio que ele mesmo possui;
+  - uma rota existente só é substituída se vier do mesmo peer (refresh)
+    ou se a nova distância for menor; se um peer parar de responder,
+    as rotas aprendidas dele viram `state = "stale"` depois de ~3
+    ciclos sem confirmação, mas nunca são apagadas automaticamente —
+    ficam visíveis no painel até o peer voltar ou um operador remover
+    manualmente.
+  - a tabela (domínio anunciado, dono, próximo salto, distância,
+    origem, estado, última vez vista) é persistida no Postgres
+    (`discover_routes`) só para sobreviver a reinicializações e para o
+    painel ler — a resolução de DNS em si nunca consulta o Postgres por
+    consulta, só um snapshot em memória atualizado a cada ciclo. O
+    painel (`GET /api/dns/routes`) apresenta essa tabela e permite
+    remover manualmente uma rota parada (`DELETE
+    /api/dns/routes/{domínio}`).
+- Nomes dentro de `DOMAINS` que não forem locais nem conhecidos pela
+  tabela de descoberta respondem **NXDOMAIN** — nunca são encaminhados
+  ao DNS público (evitaria vazar um namespace que é interno da malha)
+  nem viram silenciosamente o IP desta máquina.
 - **Split-horizon por três "views", uma por IP de bind** — o processo
   abre um socket UDP:53 separado para cada IP abaixo; como cada view é
   um socket próprio, o dns-provider sabe de onde a consulta veio só
@@ -205,11 +296,11 @@ Regras:
   para resolver `postgres`/`redis` pelo nome do serviço — fala com
   eles pelos IPs fixos atribuídos na rede `proxy`
   (`POSTGRES_HOST`/`REDIS_HOST` apontam para esses IPs fixos no
-  `docker-compose.yml`, não para os nomes dos serviços).
+  `docker-compose.services.yml`, não para os nomes dos serviços).
 - Para que **qualquer container de qualquer projeto** resolva os TLDs
   locais pela view container, o Docker daemon do host deve usar
   `DOCKER_HOST_GATEWAY` como DNS upstream. O caminho versionado é
-  `sudo bin/configure-docker-dns.sh`, que grava `"dns":
+  `sudo scripts/configure-docker-dns.sh`, que grava `"dns":
   ["10.90.0.1"]` (ou o valor de `DOCKER_HOST_GATEWAY`) em
   `/etc/docker/daemon.json`; aplicar de fato exige restart explícito do
   Docker pelo operador.
@@ -329,8 +420,9 @@ Regras:
 - Editar `.env` a partir do painel (`GET/PATCH /env` no worker) é
   restrito por "seção": a seção `hotspot` só pode tocar
   `WIFI_*`/`HOTSPOT_GATEWAY`/`HOTSPOT_CIDR`; a seção `dns` só pode
-  tocar `DNS_LOCAL_TLDS`. O editor preserva comentários, ordem e
-  chaves não mencionadas — nunca regenera o arquivo do zero.
+  tocar `DNS_LOCAL_TLDS`, `DOMAINS`, `DISCOVER_PEERS`,
+  `DISCOVER_NODE_NAME` e `DISCOVER_PORT`. O editor preserva comentários,
+  ordem e chaves não mencionadas — nunca regenera o arquivo do zero.
 - "Salvar" configuração (grava no `.env`) e "aplicar" (recria o
   container via `docker compose up -d --no-build`) são ações
   separadas — o painel nunca reinicia o hotspot/DNS sozinho ao salvar,
@@ -362,8 +454,15 @@ Regras:
 ## Regras transversais
 
 - Nenhum segredo (senha de Wi-Fi, etc.) deve ir para o Git: apenas
-  `.env.example` (com placeholders) é versionado; `.env` real é
-  ignorado (`.gitignore`).
+  `.env.example` (com placeholders) é template público. O fluxo
+  operacional versiona/usa `.env.main` como arquivo principal do
+  `promote.yml/current_stage`; `.env` real continua reservado para
+  fallback local/legado e é ignorado (`.gitignore`).
+- O entrypoint operacional é `bin/promote` (submódulo `docker-cli`) via
+  `Makefile`. A topologia Compose deve ficar dividida em
+  `docker-compose.infra.yml`, `docker-compose.services.yml`,
+  `docker-compose.assets.build.yml`, `docker-compose.assets.ports.yml`,
+  `docker-compose.deploy.yml` e o agregador `docker-compose.yml`.
 - Todo `entrypoint.sh`/script novo deve seguir `set -euo pipefail` (ou
   equivalente em `sh`), falhar alto (erro explícito + `exit 1`) em vez
   de continuar em estado inconsistente, e logar em português com

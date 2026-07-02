@@ -30,6 +30,29 @@ type interfaceInfo struct {
 	State string `json:"state"`
 }
 
+// virtualInterfacePrefixes cobre interfaces que o Docker/kernel criam
+// sozinhos e que nunca sao uma saida de internet de verdade - "br-"
+// (com hifen) e deliberado: so bate no padrao que o Docker gera pra
+// redes customizadas (br-<12 hex>), nao numa bridge manual como "br0"
+// que o usuario poderia escolher de proposito.
+var virtualInterfacePrefixes = []string{"docker", "br-", "veth", "virbr", "tun", "tap", "wg"}
+
+// isVirtualInterface filtra interfaces que nao fazem sentido nos
+// seletores de WIFI_INTERFACE/INTERNET_INTERFACE do painel: "lo"
+// (loopback) e "ap0" (interface virtual que o create_ap cria) alem das
+// interfaces geradas por Docker/VPN/bridge listadas acima.
+func isVirtualInterface(name string) bool {
+	if name == "lo" || name == "ap0" {
+		return true
+	}
+	for _, prefix := range virtualInterfacePrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // handleInterfaces lista as interfaces de rede reais do host - so
 // funciona porque o worker roda com network_mode: host.
 func handleInterfaces(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +83,7 @@ func handleInterfaces(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name := strings.SplitN(strings.TrimSpace(parts[1]), "@", 2)[0]
-		if name == "lo" {
+		if isVirtualInterface(name) {
 			continue
 		}
 		ifaceType := "other"

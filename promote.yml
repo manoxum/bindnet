@@ -1,0 +1,174 @@
+#$schema: bin/promote.schema.json
+stages:
+  - main
+  - dev
+  - test
+  - prod
+
+current_stage: main
+profile: build
+project: bindnet
+dist: deployment
+
+compose_files:
+  - docker-compose.yml
+  - docker-compose.assets.build.yml
+
+dev:
+  dockerfile: dev.dockerfile
+  compose_files:
+    - docker-compose.assets.ports.yml
+
+  services:
+    migration:
+      healthcheck:
+        test: ["CMD", "true"]
+        interval: 5s
+        timeout: 1s
+        retries: 1
+        start_period: 0s
+      volumes:
+        - ./services/migration:/app
+        - develop_migration_node_modules:/app/node_modules
+        - develop_migration_dist:/app/dist
+
+    dns-provider:
+      healthcheck:
+        test: ["CMD", "true"]
+        interval: 5s
+        timeout: 1s
+        retries: 1
+        start_period: 0s
+      environment:
+        GOCACHE: /go/cache
+        GOMODCACHE: /go/pkg/mod
+      volumes:
+        - ./services/worker/dns:/src
+        - develop_dns_go_cache:/go/cache
+        - develop_dns_go_mod:/go/pkg/mod
+
+    worker:
+      healthcheck:
+        test: ["CMD", "true"]
+        interval: 5s
+        timeout: 1s
+        retries: 1
+        start_period: 0s
+      environment:
+        GOCACHE: /go/cache
+        GOMODCACHE: /go/pkg/mod
+      volumes:
+        - ./services/worker/controller:/src
+        - develop_worker_go_cache:/go/cache
+        - develop_worker_go_mod:/go/pkg/mod
+
+    backend:
+      healthcheck:
+        test: ["CMD", "true"]
+        interval: 5s
+        timeout: 1s
+        retries: 1
+        start_period: 0s
+      environment:
+        GOCACHE: /go/cache
+        GOMODCACHE: /go/pkg/mod
+      volumes:
+        - ./services/backend:/src
+        - develop_backend_go_cache:/go/cache
+        - develop_backend_go_mod:/go/pkg/mod
+
+    frontend:
+      healthcheck:
+        test: ["CMD", "true"]
+        interval: 5s
+        timeout: 1s
+        retries: 1
+        start_period: 0s
+      environment:
+        NODE_ENV: development
+        CHOKIDAR_USEPOLLING: "true"
+        CHOKIDAR_INTERVAL: "300"
+      volumes:
+        - ./services/frontend:/app
+        - develop_frontend_node_modules:/app/node_modules
+
+  volumes:
+    develop_migration_node_modules:
+    develop_migration_dist:
+    develop_dns_go_cache:
+    develop_dns_go_mod:
+    develop_worker_go_cache:
+    develop_worker_go_mod:
+    develop_backend_go_cache:
+    develop_backend_go_mod:
+    develop_frontend_node_modules:
+
+  watch:
+    migration:
+      actions:
+        - path: ./services/migration/package.json
+          action: exec+restart
+          exec:
+            - npm install
+        - path: ./services/migration/package-lock.json
+          action: exec+restart
+          exec:
+            - npm install
+        - path: ./services/migration/prisma
+          action: recreate
+        - path: ./services/migration/dev.dockerfile
+          action: rebuild
+
+    dns-provider:
+      actions:
+        - path: ./services/worker/dns
+          action: recreate
+        - path: ./services/worker/dns/dev.dockerfile
+          action: rebuild
+
+    worker:
+      actions:
+        - path: ./services/worker/controller
+          action: recreate
+        - path: ./services/worker/controller/dev.dockerfile
+          action: rebuild
+
+    backend:
+      actions:
+        - path: ./services/backend
+          action: recreate
+        - path: ./services/backend/dev.dockerfile
+          action: rebuild
+
+    frontend:
+      actions:
+        - path: ./services/frontend/package.json
+          action: exec
+          exec:
+            - npm install
+        - path: ./services/frontend/package-lock.json
+          action: exec
+          exec:
+            - npm install
+        - path: ./services/frontend/dev.dockerfile
+          action: rebuild
+
+secrets:
+  ADMIN_PASSWORD:
+    type: secret
+    length: 32
+  POSTGRES_PASSWORD:
+    type: secret
+    length: 32
+  MONGO_PASSWORD:
+    type: secret
+    length: 32
+  MINIO_ROOT_PASSWORD:
+    type: secret
+    length: 32
+  REDIS_PASSWORD:
+    type: secret
+    length: 32
+  NGINX_UI_PASSWORD:
+    type: secret
+    length: 0
