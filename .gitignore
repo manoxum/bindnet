@@ -1,6 +1,8 @@
 # contem segredos (WIFI_PASSWORD etc.)
 .env
 
+.env.main
+
 .idea/
 
 # artefatos de build do frontend/backend/worker
