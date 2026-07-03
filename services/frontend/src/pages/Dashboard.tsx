@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { usePageHeader } from "@/hooks/usePageHeader";
 
 interface ServiceStatus {
   key: string;
@@ -27,6 +28,8 @@ const serviceInfo: Record<string, { title: string; icon: typeof Wifi; link?: str
 };
 
 export function DashboardPage() {
+  usePageHeader({ title: "Visão geral", description: "Status dos serviços do stack bindnet." });
+
   const { data, isLoading } = useQuery<ServiceStatus[]>({
     queryKey: ["dashboard"],
     queryFn: () => api.get<ServiceStatus[]>("/dashboard"),
@@ -41,8 +44,6 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Visão geral</h1>
-
       {installSecret.data?.secret && (
         <Card className="border-primary/50">
           <CardHeader className="flex flex-row items-center gap-2 space-y-0 pb-2">

@@ -36,8 +36,10 @@ func main() {
 	registerContainerRoutes(mux)
 	registerComposeRoutes(mux)
 	registerHotspotClientRoutes(mux)
+	registerHotspotFingerprintRoutes(mux)
 	registerNetworkRoutes(mux)
 	registerEnvRoutes(mux)
+	registerCARoutes(mux)
 
 	log.Println("[worker] API interna pronta em", socketPath)
 	if err := http.Serve(listener, mux); err != nil {

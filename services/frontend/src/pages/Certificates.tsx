@@ -1,26 +1,19 @@
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Download, Trash2 } from "lucide-react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { InstallCaCard } from "@/components/InstallCaCard";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { CertificateList } from "@/components/certificates/CertificateList";
+import type { Certificate } from "@/components/certificates/certificate-types";
 import { api, ApiError } from "@/lib/api";
-
-interface Certificate {
-  id: string;
-  domain: string;
-  commonName: string;
-  issuedAt: string;
-  expiresAt: string;
-  revokedAt?: string;
-}
+import { usePageHeader } from "@/hooks/usePageHeader";
 
 const issueSchema = z.object({
   domain: z.string().min(1, "Informe um domínio ou IP"),
@@ -28,11 +21,22 @@ const issueSchema = z.object({
 type IssueForm = z.infer<typeof issueSchema>;
 
 export function CertificatesPage() {
+  usePageHeader({
+    title: "Certificados (CA local)",
+    description: "Emita, liste, revogue e baixe certificados assinados pela CA local do painel.",
+  });
+
   const queryClient = useQueryClient();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const certificates = useQuery<Certificate[]>({
     queryKey: ["certificates"],
     queryFn: () => api.get<Certificate[]>("/certificates"),
+  });
+
+  const revokedCertificates = useQuery<Certificate[]>({
+    queryKey: ["certificates", "revoked"],
+    queryFn: () => api.get<Certificate[]>("/certificates/revoked"),
   });
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<IssueForm>({
@@ -45,6 +49,7 @@ export function CertificatesPage() {
       toast.success("Certificado emitido.");
       reset();
       queryClient.invalidateQueries({ queryKey: ["certificates"] });
+      queryClient.invalidateQueries({ queryKey: ["certificates", "revoked"] });
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao emitir certificado"),
   });
@@ -54,35 +59,28 @@ export function CertificatesPage() {
     onSuccess: () => {
       toast.success("Certificado revogado.");
       queryClient.invalidateQueries({ queryKey: ["certificates"] });
+      queryClient.invalidateQueries({ queryKey: ["certificates", "revoked"] });
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao revogar"),
   });
 
+  const permanentDelete = useMutation({
+    mutationFn: (id: string) => api.del(`/certificates/${id}/permanent`),
+    onSuccess: () => {
+      toast.success("Certificado eliminado.");
+      queryClient.invalidateQueries({ queryKey: ["certificates"] });
+      queryClient.invalidateQueries({ queryKey: ["certificates", "revoked"] });
+      setConfirmDeleteId(null);
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao eliminar"),
+  });
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Certificados (CA local)</h1>
       <p className="text-sm text-muted-foreground">
-        Emita, liste, revogue e baixe certificados assinados pela CA local do painel. Nada escuta mais nas portas
-        80/443 - a emissão agora é sempre uma ação explícita aqui.
+        Nada escuta mais nas portas 80/443 - a emissão agora é sempre uma ação explícita aqui. O
+        download/instalação da CA raiz agora fica em "Servidores Bindnet", junto com os outros nós da malha.
       </p>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Autoridade certificadora</CardTitle>
-          <CardDescription>Certificado raiz usado para assinar os certificados abaixo.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">
-            Importe este certificado nos dispositivos que devem confiar nos certificados emitidos abaixo.
-          </span>
-          <a href="/api/certificates/ca" download className={buttonVariants({ variant: "outline" })}>
-            <Download className="mr-2 h-4 w-4" />
-            Baixar CA
-          </a>
-        </CardContent>
-      </Card>
-
-      <InstallCaCard />
 
       <Card>
         <CardHeader>
@@ -105,58 +103,47 @@ export function CertificatesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Certificados emitidos</CardTitle>
+          <CardTitle>Certificados</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Domínio</TableHead>
-                <TableHead>Expira em</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(certificates.data ?? []).map((cert) => (
-                <TableRow key={cert.id}>
-                  <TableCell>{cert.domain}</TableCell>
-                  <TableCell>{new Date(cert.expiresAt).toLocaleDateString()}</TableCell>
-                  <TableCell>
-                    <Badge variant={cert.revokedAt ? "secondary" : "success"}>
-                      {cert.revokedAt ? "revogado" : "válido"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="flex justify-end gap-2">
-                    <a
-                      href={`/api/certificates/${cert.id}/download`}
-                      download
-                      className={buttonVariants({ variant: "outline", size: "sm" })}
-                    >
-                      <Download className="h-4 w-4" />
-                    </a>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      disabled={!!cert.revokedAt || revoke.isPending}
-                      onClick={() => revoke.mutate(cert.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {(certificates.data ?? []).length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    Nenhum certificado emitido ainda.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <Tabs defaultValue="issued">
+            <TabsList>
+              <TabsTrigger value="issued">Emitidos ({certificates.data?.length ?? 0})</TabsTrigger>
+              <TabsTrigger value="revoked">Revogados ({revokedCertificates.data?.length ?? 0})</TabsTrigger>
+            </TabsList>
+            <TabsContent value="issued">
+              <CertificateList
+                certificates={certificates.data ?? []}
+                isLoading={certificates.isLoading}
+                emptyMessage="Nenhum certificado emitido ainda."
+                revokePending={revoke.isPending}
+                onRevoke={(id) => revoke.mutate(id)}
+              />
+            </TabsContent>
+            <TabsContent value="revoked">
+              <CertificateList
+                certificates={revokedCertificates.data ?? []}
+                isLoading={revokedCertificates.isLoading}
+                emptyMessage="Nenhum certificado revogado."
+                revoked
+                permanentDeletePending={permanentDelete.isPending}
+                onPermanentDelete={(id) => setConfirmDeleteId(id)}
+              />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        onOpenChange={(open) => !open && setConfirmDeleteId(null)}
+        title="Eliminar certificado definitivamente"
+        description="Esta ação não pode ser desfeita. O certificado revogado será removido permanentemente da CA local."
+        confirmLabel="Eliminar"
+        variant="destructive"
+        pending={permanentDelete.isPending}
+        onConfirm={() => confirmDeleteId && permanentDelete.mutate(confirmDeleteId)}
+      />
     </div>
   );
 }

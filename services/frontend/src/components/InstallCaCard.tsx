@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { Download } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { Download, HardDriveDownload, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { api, ApiError } from "@/lib/api";
 
 type Os = "windows" | "macos" | "linux" | "mobile";
 
@@ -49,19 +52,65 @@ function linuxScript() {
   ].join("\n");
 }
 
+type BrowserTrustResult = {
+  store: string;
+  path: string;
+  installed: boolean;
+  error?: string;
+};
+
+type InstallLocalCAResult = {
+  path: string;
+  output?: string;
+  browserStores?: BrowserTrustResult[];
+};
+
+function browserStoresSummary(browserStores?: BrowserTrustResult[]) {
+  if (!browserStores || browserStores.length === 0) return "";
+  const installed = browserStores.filter((store) => store.installed);
+  if (installed.length === 0) return "";
+  const stores = [...new Set(installed.map((store) => store.store))];
+  return ` e nas stores de ${stores.join(", ")}`;
+}
+
 export function InstallCaCard() {
   const [os, setOs] = useState<Os>("windows");
+  const installLocal = useMutation({
+    mutationFn: () => api.post<InstallLocalCAResult>("/certificates/ca/install-local"),
+    onSuccess: (result) =>
+      toast.success(`CA instalada em ${result.path}${browserStoresSummary(result.browserStores)}`),
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : "Falha ao instalar CA neste computador"),
+  });
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Instalar CA neste computador</CardTitle>
         <CardDescription>
-          Escolha o sistema operacional para ver o passo a passo e baixar um instalador automático quando
-          disponível.
+          Use o worker para confiar nesta CA no servidor Linux atual ou baixe um instalador para outro dispositivo.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="flex flex-col gap-3 rounded-md border bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border bg-background">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Instalação local via worker</p>
+              <p className="text-sm text-muted-foreground">
+                Grava a CA no armazém de confiança Linux deste host, executa update-ca-certificates e importa a CA
+                nas stores próprias do Chrome/Chromium e do Firefox do usuário que roda o painel.
+              </p>
+            </div>
+          </div>
+          <Button onClick={() => installLocal.mutate()} disabled={installLocal.isPending}>
+            <HardDriveDownload className="h-4 w-4" />
+            {installLocal.isPending ? "Instalando..." : "Instalar localmente"}
+          </Button>
+        </div>
+
         <div className="flex flex-wrap gap-2">
           {(Object.keys(osLabels) as Os[]).map((key) => (
             <Button key={key} size="sm" variant={os === key ? "default" : "outline"} onClick={() => setOs(key)}>
@@ -87,8 +136,8 @@ export function InstallCaCard() {
           <div className="space-y-3 text-sm">
             <p className="text-muted-foreground">
               Baixe o script abaixo e execute-o com <code>sudo bash instalar-ca-bindnet.sh</code>. Ele baixa a CA e
-              roda <code>update-ca-certificates</code> (Debian/Ubuntu; distribuições baseadas em outro gerenciador
-              de certificados podem precisar de um comando equivalente).
+              roda <code>update-ca-certificates</code>. Se este painel está no mesmo servidor, o botão acima faz isso
+              pelo worker.
             </p>
             <Button onClick={() => downloadTextFile("instalar-ca-bindnet.sh", linuxScript())}>
               <Download className="mr-2 h-4 w-4" />

@@ -35,7 +35,13 @@ func zoneFor(fqdn string, cfg *dnsConfig) (zone string, kind zoneKind, nextHop s
 		return zone + ".", zoneLocal, ""
 	}
 	if zone, ok := suffixZoneFor(labels, cfg.domainZones); ok {
+		if zone == name {
+			return zone + ".", zoneLocal, ""
+		}
 		if route, ok := cfg.routes.lookup(zone); ok {
+			if route.Source == "self" {
+				return zone + ".", zoneLocal, ""
+			}
 			if route.NextHop != "" {
 				return zone + ".", zoneRemote, route.NextHop
 			}

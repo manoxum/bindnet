@@ -1,9 +1,11 @@
 // certificates_routes.go expoe via HTTP a gestao de certificados
 // (certificates.go/ca.go). Substitui o antigo registrarRotasCertProxy
-// (so leitura). Todas as rotas exigem sessao - diferente do antigo
-// cert-proxy, que servia /ca.crt anonimamente na porta 80; esse acesso
-// anonimo nao existe mais (nada escuta em 80/443 depois da remocao do
-// cert-proxy).
+// (so leitura). Quase todas as rotas exigem sessao - excecao
+// deliberada: GET /api/mesh/ca, que devolve so o certificado publico
+// da CA (nunca a chave privada) sem autenticacao, para que outros nos
+// da malha Bindnet consigam buscar essa CA e o usuario decidir se
+// confia nela, igual ao antigo cert-proxy (que servia /ca.crt
+// anonimamente na porta 80) - so que agora escopado a essa unica rota.
 package main
 
 import (
@@ -17,9 +19,40 @@ type issueCertificateRequest struct {
 	Domain string `json:"domain"`
 }
 
-func registerCertificateRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB, ca *localCA, audit *auditClient) {
+type installLocalCARequest struct {
+	CertificatePEM string `json:"certificatePem,omitempty"`
+}
+
+type installLocalCAWorkerRequest struct {
+	CertificatePEM string `json:"certificatePem"`
+}
+
+type browserTrustResult struct {
+	Store     string `json:"store"`
+	Path      string `json:"path"`
+	Installed bool   `json:"installed"`
+	Error     string `json:"error,omitempty"`
+}
+
+type installLocalCAResponse struct {
+	Path          string               `json:"path"`
+	Output        string               `json:"output,omitempty"`
+	BrowserStores []browserTrustResult `json:"browserStores,omitempty"`
+}
+
+func registerCertificateRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB, ca *localCA, worker *workerClient, audit *auditClient) {
 	mux.HandleFunc("GET /api/certificates", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		certificates, err := listCertificates(db)
+		certificates, err := listCertificates(db, false)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(certificates)
+	}))
+
+	mux.HandleFunc("GET /api/certificates/revoked", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		certificates, err := listCertificates(db, true)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -51,14 +84,49 @@ func registerCertificateRoutes(mux *http.ServeMux, admin *administrator, db *sql
 		username, _ := sessionUser(r, admin)
 		domain, err := revokeCertificate(db, id)
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "certificado nao encontrado ou ja revogado", http.StatusNotFound)
+			http.Error(w, "certificado nao encontrado", http.StatusNotFound)
 			return
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if err := removeCertificateFromNginxUI(domain); err != nil {
+			http.Error(w, "certificado revogado no Bindnet, mas falhou ao remover do nginx-ui: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		audit.record(r.Context(), "certificate_revoked", username, map[string]any{"id": id, "domain": domain})
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	mux.HandleFunc("DELETE /api/certificates/{id}/permanent", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		username, _ := sessionUser(r, admin)
+		domain, err := revokedCertificateDomainByID(db, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "certificado nao encontrado", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, errCertificateNotRevoked) {
+			http.Error(w, "apenas certificados revogados podem ser eliminados permanentemente", http.StatusConflict)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := removeCertificateFromNginxUI(domain); err != nil {
+			http.Error(w, "falhou ao limpar certificado no nginx-ui: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := permanentlyDeleteCertificate(db, id); errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "certificado revogado nao encontrado", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		audit.record(r.Context(), "certificate_permanently_deleted", username, map[string]any{"id": id, "domain": domain})
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -77,6 +145,33 @@ func registerCertificateRoutes(mux *http.ServeMux, admin *administrator, db *sql
 
 	mux.HandleFunc("GET /api/certificates/ca", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		serveCertificate(w, ca.CertificatePEM, "bindnet-local-ca.crt")
+	}))
+
+	// GET /api/mesh/ca e a unica rota deste arquivo sem requireSession -
+	// ver comentario de pacote no topo do arquivo.
+	mux.HandleFunc("GET /api/mesh/ca", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		serveCertificate(w, ca.CertificatePEM, "bindnet-local-ca.crt")
+	})
+
+	mux.HandleFunc("POST /api/certificates/ca/install-local", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		username, _ := sessionUser(r, admin)
+		var req installLocalCARequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		certificatePEM := ca.CertificatePEM
+		if req.CertificatePEM != "" {
+			certificatePEM = req.CertificatePEM
+		}
+		var response installLocalCAResponse
+		if err := worker.call(r.Context(), http.MethodPost, "/ca/install-local", installLocalCAWorkerRequest{
+			CertificatePEM: certificatePEM,
+		}, &response); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		audit.record(r.Context(), "ca_installed_local", username, map[string]any{"path": response.Path})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 }
 

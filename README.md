@@ -25,7 +25,7 @@ arquivos provisionado para uso futuro (MinIO).
                     │   hotspot (create_ap)  │  privileged, network_mode: host
                     │   WIFI_INTERFACE → AP   │
                     └───────────┬───────────┘
-                                │ NAT para internet via INTERNET_INTERFACE
+                                │ NAT para internet via uplink virtual
                                 │
                     ┌───────────────────────┐
                     │  dns-provider (Go)      │  network_mode: host
@@ -164,7 +164,9 @@ use a UI; subir o painel sozinho não inicia `hotspot` nem
 
 ⚠️ Iniciar o hotspot desconecta a placa Wi-Fi (`WIFI_INTERFACE`) do uso
 normal como cliente enquanto estiver ativo. Use o botão "Parar" para
-reverter isso de forma limpa.
+reverter isso de forma limpa. Se o host continuar mostrando "No Wi-Fi
+Adapter Found" depois de uma queda/restart fora do painel, use
+"Recuperar Wi-Fi" na tela "Hotspot Wi-Fi".
 
 ### Painel de gestão web
 
@@ -200,7 +202,9 @@ Resumo das mais relevantes:
 | Variável | Obrigatória | Padrão | Descrição |
 |---|---|---|---|
 | `WIFI_INTERFACE` | sim | — | interface Wi-Fi física que vira o AP |
-| `INTERNET_INTERFACE` | sim | — | interface com saída para a internet, ou `auto` (rota padrão do host); pode ser igual a `WIFI_INTERFACE` se a placa suportar AP+STA concorrente |
+| `INTERNET_INTERFACE` | sim | — | interface real com saída para a internet, ou `auto` (melhor interface real entre as rotas padrão, por velocidade reportada); pode ser igual a `WIFI_INTERFACE` se a placa suportar AP+STA concorrente |
+| `BINDNET_UPLINK_INTERFACE` | não | `bn-uplink` | interface dummy estável entregue ao `create_ap`; o Bindnet alimenta essa interface com NAT/forward da interface real escolhida |
+| `UPLINK_MONITOR_INTERVAL` | não | `10` | intervalo, em segundos, para reavaliar a melhor fonte quando `INTERNET_INTERFACE=auto` |
 | `WIFI_SSID` | sim | — | nome da rede Wi-Fi criada |
 | `WIFI_PASSWORD` | sim | — | senha WPA2 da rede |
 | `WIFI_COUNTRY` | não | `ST` | código regulatório de país |
@@ -208,6 +212,7 @@ Resumo das mais relevantes:
 | `WIFI_CHANNEL_CANDIDATES` | não | por banda | candidatos avaliados na seleção automática |
 | `WIFI_FREQ_BAND` | não | `auto` | `2.4`, `5` ou seleção automática por capacidade da placa |
 | `HOTSPOT_GATEWAY` | não | `192.168.12.1` | IP do hotspot na rede local |
+| `HOTSPOT_DNS_FALLBACKS` | não | `1.1.1.1,8.8.8.8` | DNS públicos entregues depois do gateway Bindnet no DHCP, para navegação continuar se o `dns-provider` reiniciar |
 | `DOCKER_HOST_GATEWAY` | não | — | IP do host visto pelos containers (bind extra do DNS) |
 | `DNS_LOCAL_TLDS` | não | `local,test,example` | TLDs resolvidos como locais pelo `dns-provider` |
 | `DOMAINS` | não | vazio | TLDs/zonas que participam do discover mode por próximo salto |
@@ -233,11 +238,15 @@ A gestão de certificados agora é feita pelo painel de gestão web
 escuta mais nas portas 80/443. Para baixar a CA:
 
 1. Acesse o painel (`http://<ip-do-host>:9090`) e faça login.
-2. Vá em "Certificados" e clique em "Baixar CA".
+2. Vá em "Certificados" e clique em "Baixar CA" ou, no próprio servidor
+   Linux onde o Bindnet roda, clique em "Instalar localmente".
 
 Importe o arquivo baixado (`bindnet-local-ca.crt`) no armazém de
 confiança do sistema operacional ou do navegador que for acessar
-sites assinados por essa CA. Diferente do antigo `cert-proxy`,
+sites assinados por essa CA. A instalação local pelo painel é delegada
+ao `worker`: ele grava a CA em
+`/usr/local/share/ca-certificates/bindnet-local-ca.crt` e executa
+`update-ca-certificates` no host Linux. Diferente do antigo `cert-proxy`,
 certificados para domínios específicos não são mais emitidos
 automaticamente por SNI — use o formulário "Emitir certificado" na
 mesma tela para gerar um certificado para um domínio/IP específico.
@@ -309,6 +318,10 @@ CLAUDE.md                   # diretrizes para ferramentas de IA neste repo
   confira `docker compose logs hotspot`; verifique se `WIFI_INTERFACE`
   suporta modo AP (`iw list` deve listar `AP` em "Supported interface
   modes").
+- **Ubuntu/GNOME mostra "No Wi-Fi Adapter Found" após usar o hotspot**:
+  na tela "Hotspot Wi-Fi", clique em "Recuperar Wi-Fi". O painel para
+  `hotspot`/`dns-provider`, recarrega o NetworkManager e devolve
+  `WIFI_INTERFACE` ao controle normal do sistema.
 - **`dns-provider` não sobe / fica esperando IPs**: ele espera
   `127.0.0.1` e `DOCKER_HOST_GATEWAY` existirem como IPs na máquina
   antes de iniciar. O listener de `HOTSPOT_GATEWAY` é aberto depois,

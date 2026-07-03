@@ -30,6 +30,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("[backend] erro ao preparar CA local: %v", err)
 	}
+	if err := syncIssuedCertificatesToNginxUI(db); err != nil {
+		log.Printf("[backend] falha no sync inicial de certificados com nginx-ui: %v", err)
+	}
 
 	audit, err := openMongo()
 	if err != nil {
@@ -42,11 +45,13 @@ func main() {
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, admin, audit)
 	registerDashboardRoutes(mux, worker, admin)
-	registerHotspotRoutes(mux, worker, admin, audit)
+	registerHotspotRoutes(mux, worker, admin, audit, db)
+	registerHotspotDeviceRoutes(mux, admin, db, worker)
+	registerHotspotBlocklistRoutes(mux, admin, db, worker)
 	registerDNSRoutes(mux, worker, admin, audit)
 	registerDNSRouteRoutes(mux, admin, db, audit)
 	registerDNSPeerRoutes(mux, admin, db)
-	registerCertificateRoutes(mux, admin, db, ca, audit)
+	registerCertificateRoutes(mux, admin, db, ca, worker, audit)
 	registerNginxUIRoutes(mux, admin)
 
 	port := getenv("BACKEND_PORT", "8090")

@@ -10,4 +10,4 @@ ENV GOMODCACHE=/go/pkg/mod
 
 EXPOSE 53/udp
 
-CMD ["go", "run", "."]
+ENTRYPOINT ["sh", "-c", "go build -o /tmp/dns-provider . && exec /tmp/dns-provider"]

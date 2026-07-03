@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,7 +15,7 @@ var (
 	bandRegex    = regexp.MustCompile(`Banda Wi-Fi automatica escolhida: ([\d.]+)GHz`)
 )
 
-func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *administrator, audit *auditClient) {
+func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *administrator, audit *auditClient, db *sql.DB) {
 	mux.HandleFunc("GET /api/hotspot/config", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		var config map[string]string
 		if err := worker.call(r.Context(), http.MethodGet, "/env?section=hotspot", nil, &config); err != nil {
@@ -58,6 +60,10 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
+		iface, err := currentHotspotInterface(r, worker)
+		if err == nil {
+			reapplyHotspotBlocklist(r.Context(), db, worker, iface)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -67,18 +73,18 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		if err := worker.call(r.Context(), http.MethodPost, "/network/wifi-unmanage", map[string]string{"interface": iface}, nil); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
 		// Usa "docker compose up" (via /hotspot/apply) em vez de "docker
 		// start": cria os containers se ainda nao existirem (1ª subida) e
 		// tambem os recria se o .env mudou desde a ultima vez - e a mesma
 		// operacao que scripts/hotspot-on.sh fazia, agora só pelo painel.
+		// Nao desgerencia a placa Wi-Fi fisica: quando o adaptador suporta
+		// AP+STA, o create_ap cria uma interface AP virtual e mantem o Wi-Fi
+		// cliente ativo.
 		if err := worker.call(r.Context(), http.MethodPost, "/hotspot/apply", nil, nil); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
+		reapplyHotspotBlocklist(r.Context(), db, worker, iface)
 		username, _ := sessionUser(r, admin)
 		audit.record(r.Context(), "hotspot_started", username, nil)
 		w.WriteHeader(http.StatusNoContent)
@@ -90,18 +96,27 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		for _, service := range []string{"hotspot", "dns-provider"} {
-			if err := worker.call(r.Context(), http.MethodPost, "/containers/"+service+"/stop", nil, nil); err != nil {
-				http.Error(w, err.Error(), http.StatusBadGateway)
-				return
-			}
-		}
-		if err := worker.call(r.Context(), http.MethodPost, "/network/wifi-manage", map[string]string{"interface": iface}, nil); err != nil {
+		if err := recoverWifiAdapter(r.Context(), worker, iface); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
 		username, _ := sessionUser(r, admin)
 		audit.record(r.Context(), "hotspot_stopped", username, nil)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	mux.HandleFunc("POST /api/hotspot/recover-wifi", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		iface, err := currentHotspotInterface(r, worker)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		if err := recoverWifiAdapter(r.Context(), worker, iface); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		username, _ := sessionUser(r, admin)
+		audit.record(r.Context(), "wifi_adapter_recovered", username, map[string]any{"interface": iface})
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -137,18 +152,13 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 	}))
 
 	mux.HandleFunc("GET /api/hotspot/clients", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		iface, err := currentHotspotInterface(r, worker)
+		clients, err := listEnrichedHotspotClients(r, db, worker)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		var clients json.RawMessage
-		if err := worker.call(r.Context(), http.MethodGet, "/hotspot/clients?interface="+iface, nil, &clients); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(clients)
+		_ = json.NewEncoder(w).Encode(clients)
 	}))
 
 	mux.HandleFunc("GET /api/hotspot/logs", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
@@ -169,4 +179,13 @@ func currentHotspotInterface(r *http.Request, worker *workerClient) (string, err
 		return "", errors.New("WIFI_INTERFACE nao configurado")
 	}
 	return iface, nil
+}
+
+func recoverWifiAdapter(ctx context.Context, worker *workerClient, iface string) error {
+	for _, service := range []string{"hotspot", "dns-provider"} {
+		if err := worker.call(ctx, http.MethodPost, "/containers/"+service+"/stop", nil, nil); err != nil {
+			return err
+		}
+	}
+	return worker.call(ctx, http.MethodPost, "/network/wifi-manage", map[string]string{"interface": iface}, nil)
 }

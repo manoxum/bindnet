@@ -2,6 +2,8 @@ services:
   nginx-ui:
     ports:
       - "${NGINX_UI_PORT:-9080}:9000"
+      - "443:443"
+      - "80:80"
 
   backend:
     ports:

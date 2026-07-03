@@ -13,6 +13,7 @@ import (
 	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/pem"
+	"errors"
 	"log"
 	"net"
 	"strings"
@@ -20,6 +21,8 @@ import (
 )
 
 const defaultDomain = "localhost.local"
+
+var errCertificateNotRevoked = errors.New("certificado ainda nao foi revogado")
 
 type certificateResponse struct {
 	ID          string   `json:"id"`
@@ -122,10 +125,16 @@ func issueCertificate(db *sql.DB, ca *localCA, rawDomain string) (*certificateRe
 	}, nil
 }
 
-func listCertificates(db *sql.DB) ([]certificateResponse, error) {
+func listCertificates(db *sql.DB, revoked bool) ([]certificateResponse, error) {
+	revokedFilter := `revoked_at IS NULL`
+	if revoked {
+		revokedFilter = `revoked_at IS NOT NULL`
+	}
 	rows, err := db.Query(
 		`SELECT id, domain, common_name, COALESCE(array_to_string(dns_names, ','), ''), COALESCE(array_to_string(ip_addresses, ','), ''), issued_at, expires_at, revoked_at
-		 FROM certificates ORDER BY created_at DESC`,
+		 FROM certificates
+		 WHERE ` + revokedFilter + `
+		 ORDER BY created_at DESC`,
 	)
 	if err != nil {
 		return nil, err
@@ -156,18 +165,82 @@ func listCertificates(db *sql.DB) ([]certificateResponse, error) {
 
 // revokeCertificate seta revoked_at em vez de deletar a linha -
 // mantem o historico visivel na listagem (com status "revogado").
+// A operacao e idempotente para permitir nova tentativa de limpeza do
+// nginx-ui caso a primeira remocao externa falhe depois da revogacao local.
 func revokeCertificate(db *sql.DB, id string) (string, error) {
 	var domain string
-	err := db.QueryRow(
-		`UPDATE certificates SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING domain`,
-		id,
-	).Scan(&domain)
+	if err := db.QueryRow(`SELECT domain FROM certificates WHERE id = $1`, id).Scan(&domain); err != nil {
+		return "", err
+	}
+	_, err := db.Exec(`UPDATE certificates SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1`, id)
 	return domain, err
+}
+
+func revokedCertificateDomainByID(db *sql.DB, id string) (string, error) {
+	var domain string
+	var revokedAt sql.NullTime
+	err := db.QueryRow(`SELECT domain, revoked_at FROM certificates WHERE id = $1`, id).Scan(&domain, &revokedAt)
+	if err != nil {
+		return "", err
+	}
+	if !revokedAt.Valid {
+		return "", errCertificateNotRevoked
+	}
+	return domain, nil
+}
+
+func permanentlyDeleteCertificate(db *sql.DB, id string) error {
+	result, err := db.Exec(`DELETE FROM certificates WHERE id = $1 AND revoked_at IS NOT NULL`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func certificatePEMByID(db *sql.DB, id string) (domain, certificatePEM string, err error) {
 	err = db.QueryRow(`SELECT domain, certificate_pem FROM certificates WHERE id = $1`, id).Scan(&domain, &certificatePEM)
 	return domain, certificatePEM, err
+}
+
+func syncIssuedCertificatesToNginxUI(db *sql.DB) error {
+	rows, err := db.Query(
+		`SELECT domain, certificate_pem, private_key_pem
+		 FROM certificates
+		 WHERE revoked_at IS NULL
+		 ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	count := 0
+	failures := 0
+	for rows.Next() {
+		var domain, certificatePEM, privateKeyPEM string
+		if err := rows.Scan(&domain, &certificatePEM, &privateKeyPEM); err != nil {
+			return err
+		}
+		count++
+		if err := syncCertificateToNginxUI(domain, certificatePEM, privateKeyPEM); err != nil {
+			failures++
+			log.Printf("[backend] falha ao importar certificado existente de %s no nginx-ui: %v", domain, err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if count > 0 {
+		log.Printf("[backend] sync inicial de certificados no nginx-ui concluido: total=%d falhas=%d", count, failures)
+	}
+	return nil
 }
 
 // splitNonEmpty separa valores de array_to_string(coluna, ',') - retorna

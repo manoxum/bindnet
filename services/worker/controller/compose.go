@@ -22,7 +22,7 @@ func registerComposeRoutes(mux *http.ServeMux) {
 // .env. --no-build evita reconstruir a imagem, so recria o container.
 func handleApplyServices(services []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		args := composeArgs(append([]string{"up", "-d", "--no-build"}, services...)...)
+		args := composeArgs(append([]string{"up", "-d", "--no-build", "--no-deps"}, services...)...)
 		output, err := exec.Command("docker", args...).CombinedOutput()
 		if err != nil {
 			log.Printf("[worker] erro ao aplicar config (%v): %v (%s)", services, err, output)
@@ -34,7 +34,13 @@ func handleApplyServices(services []string) http.HandlerFunc {
 }
 
 func composeArgs(args ...string) []string {
-	base := []string{"compose", "--project-name", composeProjectName, "--project-directory", "/workspace"}
+	base := []string{
+		"compose",
+		"--project-name", composeProjectName,
+		"--project-directory", "/workspace",
+		"--env-file", envPath(),
+		"-f", "/workspace/docker-compose.services.yml",
+	}
 	return append(base, args...)
 }
 

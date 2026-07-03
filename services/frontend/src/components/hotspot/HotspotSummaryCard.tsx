@@ -1,0 +1,96 @@
+import { Flag, Globe, Hash, Play, RefreshCw, Router, Settings2, Square, Waves, Wifi, type LucideIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { HotspotWifiQr } from "@/components/hotspot/HotspotWifiQr";
+
+interface HotspotSummaryCardProps {
+  config: Record<string, string>;
+  running: boolean;
+  startPending: boolean;
+  stopPending: boolean;
+  recoverPending: boolean;
+  onStart: () => void;
+  onStop: () => void;
+  onRecover: () => void;
+  onEdit: () => void;
+}
+
+function ConfigItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 transition-colors hover:bg-muted/60">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="truncate text-sm font-semibold">{value || "—"}</p>
+      </div>
+    </div>
+  );
+}
+
+// Mostra a configuração atualmente aplicada (a que está em vigor no hotspot,
+// não a do formulário ainda não salvo) e um QR para conectar direto pelo celular.
+export function HotspotSummaryCard({
+  config,
+  running,
+  startPending,
+  stopPending,
+  recoverPending,
+  onStart,
+  onStop,
+  onRecover,
+  onEdit,
+}: HotspotSummaryCardProps) {
+  const ssid = config.WIFI_SSID ?? "";
+  const password = config.WIFI_PASSWORD ?? "";
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-start sm:justify-between space-y-0">
+        <div className="flex items-center gap-3">
+          <div>
+            <CardTitle>Configuração atual</CardTitle>
+            <CardDescription>Valores em vigor no hotspot neste momento.</CardDescription>
+          </div>
+          <Badge variant={running ? "success" : "secondary"}>{running ? "ligado" : "desligado"}</Badge>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={onStart} disabled={running || startPending || recoverPending}>
+            <Play className="h-4 w-4" />
+            Iniciar
+          </Button>
+          <Button size="sm" variant="destructive" onClick={onStop} disabled={!running || stopPending || recoverPending}>
+            <Square className="h-4 w-4" />
+            Parar
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={onRecover}
+            disabled={recoverPending || startPending || stopPending}
+          >
+            <RefreshCw className={recoverPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+            Recuperar Wi-Fi
+          </Button>
+          <Button variant="outline" size="sm" onClick={onEdit}>
+            <Settings2 className="h-4 w-4" />
+            Alterar configuração
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-6 pt-5 sm:flex-row sm:items-stretch sm:justify-between">
+        {ssid && password && <HotspotWifiQr ssid={ssid} password={password} />}
+        <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
+          <ConfigItem icon={Wifi} label="SSID" value={ssid} />
+          <ConfigItem icon={Router} label="Interface Wi-Fi" value={config.WIFI_INTERFACE ?? ""} />
+          <ConfigItem icon={Globe} label="Interface de internet" value={config.INTERNET_INTERFACE ?? ""} />
+          <ConfigItem icon={Flag} label="País" value={config.WIFI_COUNTRY ?? ""} />
+          <ConfigItem icon={Waves} label="Banda" value={config.WIFI_FREQ_BAND ?? ""} />
+          <ConfigItem icon={Hash} label="Canal" value={config.WIFI_CHANNEL ?? ""} />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

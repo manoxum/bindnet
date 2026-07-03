@@ -14,7 +14,6 @@ export function DiscoverMeshConfigCard() {
   const queryClient = useQueryClient();
   const [domains, setDomains] = useState("");
   const [nodeName, setNodeName] = useState("");
-  const [peers, setPeers] = useState("");
 
   const config = useQuery<Record<string, string>>({
     queryKey: ["dns", "config"],
@@ -25,13 +24,11 @@ export function DiscoverMeshConfigCard() {
     if (config.data) {
       setDomains(config.data.DOMAINS ?? "");
       setNodeName(config.data.DISCOVER_NODE_NAME ?? "");
-      setPeers(config.data.DISCOVER_PEERS ?? "");
     }
   }, [config.data]);
 
   const save = useMutation({
-    mutationFn: () =>
-      api.patch("/dns/config", { DOMAINS: domains, DISCOVER_NODE_NAME: nodeName, DISCOVER_PEERS: peers }),
+    mutationFn: () => api.patch("/dns/config", { DOMAINS: domains, DISCOVER_NODE_NAME: nodeName }),
     onSuccess: () => {
       toast.success("Malha de descoberta salva. Clique em 'Aplicar' para reiniciar o DNS com os novos valores.");
       queryClient.invalidateQueries({ queryKey: ["dns", "config"] });
@@ -68,15 +65,6 @@ export function DiscoverMeshConfigCard() {
               placeholder="ex.: servidor-a"
               value={nodeName}
               onChange={(e) => setNodeName(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor="peers">Servidores vizinhos (DISCOVER_PEERS)</Label>
-            <Input
-              id="peers"
-              placeholder="ex.: 10.0.0.2:8531, 10.0.0.3:8531"
-              value={peers}
-              onChange={(e) => setPeers(e.target.value)}
             />
           </div>
         </div>

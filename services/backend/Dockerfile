@@ -6,5 +6,9 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /out/backend .
 
 FROM alpine:3.22
+RUN apk add --no-cache ca-certificates curl \
+    && mkdir -p /usr/local/share/bindnet \
+    && curl -fsSL https://standards-oui.ieee.org/oui/oui.csv -o /usr/local/share/bindnet/oui.csv \
+    && apk del curl
 COPY --from=build /out/backend /usr/local/bin/backend
 ENTRYPOINT ["/usr/local/bin/backend"]

@@ -1,6 +1,6 @@
 services:
   nginx-ui:
-    image: uozi/nginx-ui:v2.3.11
+    image: uozi/nginx-ui:v2.4.0
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Africa/Sao_Tome}
@@ -11,6 +11,7 @@ services:
       - nginx_config:/etc/nginx
       - nginx_ui_data:/etc/nginx-ui
       - www_data:/var/www
+
     networks:
       - proxy
 

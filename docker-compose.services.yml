@@ -47,6 +47,7 @@ services:
   worker:
     image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-worker-${STAGE:-main}-${VERSION:-latest}
     restart: unless-stopped
+    privileged: true
     network_mode: host
     env_file:
       - ${BINDNET_ENV_FILE:-.env.main}
@@ -56,6 +57,15 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /run/dbus:/run/dbus
       - /etc/NetworkManager/conf.d:/etc/NetworkManager/conf.d
+      - /usr/local/share/ca-certificates:/usr/local/share/ca-certificates
+      - /etc/ssl/certs:/etc/ssl/certs
+      # /home de todos os usuarios do host - usado so por
+      # /api/certificates/ca/install-local para importar a CA local nas
+      # stores NSS proprias do Chrome/Chromium (~/.pki/nssdb) e do
+      # Firefox (~/.mozilla/firefox/*) de cada usuario, que nao leem
+      # /usr/local/share/ca-certificates. Sem isso a CA fica instalada
+      # no sistema mas o navegador continua nao confiando nela.
+      - /home:/hosthome
       - worker_ipc:/run/bindnet-admin
       - ./:/workspace
 
@@ -78,6 +88,7 @@ services:
       MONGO_HOST: mongo
       MONGO_PORT: "27017"
       CA_COMMON_NAME: ${CA_COMMON_NAME:-Bindnet Local Development CA}
+      BINDNET_OUI_DB_PATH: ${BINDNET_OUI_DB_PATH:-/usr/local/share/bindnet/oui.csv}
       NGINX_UI_URL: ${NGINX_UI_URL:-http://nginx-ui:9000}
       NGINX_UI_USERNAME: ${NGINX_UI_USERNAME:-}
       NGINX_UI_PASSWORD: ${NGINX_UI_PASSWORD:-}
@@ -86,8 +97,8 @@ services:
     volumes:
       - admin_data:/data
       - cert_proxy_data:/certproxy-data:ro
-      - nginx_ui_data:/nginx-ui-data:ro
-      - nginx_config:/nginx-config:ro
+      - nginx_ui_data:/nginx-ui-data
+      - nginx_config:/nginx-config
       - worker_ipc:/run/bindnet-admin
     depends_on:
       worker:

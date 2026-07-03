@@ -113,3 +113,121 @@ model DiscoverPeer {
 
   @@map("discover_peers")
 }
+
+// MACs bloqueados manualmente pelo painel (tela "Clientes conectados"
+// do hotspot). services/backend reaplica esta lista via
+// "hostapd_cli deny_acl" (services/worker/controller/hotspot_acl.go)
+// toda vez que o hotspot sobe, ja que a ACL do hostapd so existe na
+// memoria do processo e nao sobrevive a um restart do container.
+model HotspotBlockedDevice {
+  macAddress String   @id @map("mac_address")
+  note       String?
+  blockedAt  DateTime @default(now()) @map("blocked_at") @db.Timestamptz
+
+  @@map("hotspot_blocked_devices")
+}
+
+// Cache de identificacao de dispositivo por MAC (fabricante via OUI +
+// heuristica de tipo/SO a partir do hostname/fingerprint DHCP - ver
+// services/backend/hotspot_devices.go). Evita repetir a consulta
+// externa (api.macvendors.com) e o parsing do log DHCP a cada poll de
+// 5s da tela de clientes.
+model HotspotDeviceInfo {
+  macAddress String   @id @map("mac_address")
+  vendor     String?
+  deviceName String?  @map("device_name")
+  osName     String?  @map("os_name")
+  confidence Int?
+  fetchedAt  DateTime @default(now()) @map("fetched_at") @db.Timestamptz
+
+  @@map("hotspot_device_info")
+}
+
+// Limite de trafego para todo o hotspot (singleton, id fixo "global").
+// Taxa (Mbps) e cota (bytes/periodo) sao independentes e ambas
+// opcionais - null em qualquer uma delas significa "sem limite desse
+// tipo". Ver services/backend/hotspot_limits.go.
+model HotspotGlobalLimits {
+  id                        String   @id @default("global") @map("id")
+  downloadRateMbps          Int?     @map("download_rate_mbps")
+  uploadRateMbps            Int?     @map("upload_rate_mbps")
+  quotaBytes                BigInt?  @map("quota_bytes")
+  quotaPeriod               String?  @map("quota_period")
+  quotaThrottleDownloadMbps Int?     @map("quota_throttle_download_mbps")
+  quotaThrottleUploadMbps   Int?     @map("quota_throttle_upload_mbps")
+  updatedAt                 DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_global_limits")
+}
+
+// Limite de trafego por dispositivo (mesma chave natural mac_address
+// de HotspotBlockedDevice/HotspotDeviceInfo). Ver hotspot_limits.go.
+model HotspotDeviceLimits {
+  macAddress                String   @id @map("mac_address")
+  downloadRateMbps          Int?     @map("download_rate_mbps")
+  uploadRateMbps            Int?     @map("upload_rate_mbps")
+  quotaBytes                BigInt?  @map("quota_bytes")
+  quotaPeriod               String?  @map("quota_period")
+  quotaThrottleDownloadMbps Int?     @map("quota_throttle_download_mbps")
+  quotaThrottleUploadMbps   Int?     @map("quota_throttle_upload_mbps")
+  updatedAt                 DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_device_limits")
+}
+
+// Acumulador de uso do periodo corrente para a cota global (singleton).
+// last_*_counter guarda a ultima leitura absoluta dos contadores do
+// worker, usada para calcular o delta a cada ciclo de reconciliacao -
+// ver services/backend/hotspot_traffic.go.
+model HotspotGlobalTraffic {
+  id                  String   @id @default("global") @map("id")
+  periodStart         DateTime @default(now()) @map("period_start") @db.Timestamptz
+  periodEnd           DateTime @default(now()) @map("period_end") @db.Timestamptz
+  downloadBytes       BigInt   @default(0) @map("download_bytes")
+  uploadBytes         BigInt   @default(0) @map("upload_bytes")
+  lastDownloadCounter BigInt   @default(0) @map("last_download_counter")
+  lastUploadCounter   BigInt   @default(0) @map("last_upload_counter")
+  throttled           Boolean  @default(false)
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_global_traffic")
+}
+
+// Acumulador de uso do periodo corrente por dispositivo, criado de
+// forma preguicosa na 1a vez que o dispositivo precisa ser rastreado
+// (nao depende de limite configurado - tambem alimenta a velocidade ao
+// vivo da pagina de detalhe). fwmark e o classid HTB/marca iptables
+// dedicados a este dispositivo, atribuidos por
+// hotspot_device_fwmark_seq (nunca hash de MAC, evita colisao).
+model HotspotDeviceTraffic {
+  macAddress          String   @id @map("mac_address")
+  fwmark              Int      @unique @default(dbgenerated("nextval('hotspot_device_fwmark_seq')"))
+  periodStart         DateTime @default(now()) @map("period_start") @db.Timestamptz
+  periodEnd           DateTime @default(now()) @map("period_end") @db.Timestamptz
+  downloadBytes       BigInt   @default(0) @map("download_bytes")
+  uploadBytes         BigInt   @default(0) @map("upload_bytes")
+  lastDownloadCounter BigInt   @default(0) @map("last_download_counter")
+  lastUploadCounter   BigInt   @default(0) @map("last_upload_counter")
+  throttled           Boolean  @default(false)
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_device_traffic")
+}
+
+// Credito/recarga por dispositivo (services/backend/hotspot_credit.go).
+// blockedByCredit fica separado de HotspotBlockedDevice (bloqueio
+// manual do admin) de proposito - os dois mecanismos de bloqueio nao
+// devem se confundir. recharge_period null = so recarga manual.
+model HotspotDeviceCredit {
+  macAddress          String    @id @map("mac_address")
+  enabled             Boolean   @default(false)
+  balanceBytes        BigInt    @default(0) @map("balance_bytes")
+  rechargeAmountBytes BigInt?   @map("recharge_amount_bytes")
+  rechargePeriod      String?   @map("recharge_period")
+  plafondBytes        BigInt?   @map("plafond_bytes")
+  nextRechargeAt      DateTime? @map("next_recharge_at") @db.Timestamptz
+  blockedByCredit     Boolean   @default(false) @map("blocked_by_credit")
+  updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_device_credit")
+}

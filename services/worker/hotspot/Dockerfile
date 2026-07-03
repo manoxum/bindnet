@@ -1,9 +1,17 @@
 FROM alpine:3.22
 
+# grep: substitui o applet grep do BusyBox pelo GNU grep. O create_ap
+# usa "grep -E '{.* managed.* AP.*}'" (regex com "{" solto) pra checar
+# se o adaptador suporta AP+estacao simultaneos via "iw phy info" - o
+# BusyBox grep trata "{" sem bound valido como erro de sintaxe e falha
+# sempre, fazendo o create_ap concluir (errado, em qualquer adaptador)
+# que o modo concorrente nao e suportado. GNU grep trata "{" solto como
+# literal (extensao GNU), igual o create_ap espera.
 RUN apk add --no-cache \
     bash \
     curl \
     dnsmasq \
+    grep \
     hostapd \
     iproute2 \
     iptables \

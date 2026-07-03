@@ -62,7 +62,13 @@ Regras:
       canal é utilizável (o adaptador pode reportar suporte a uma
       banda via `iw phy info` e ainda assim rejeitar canais específicos
       dela, ex.: `create_ap` retornando "adapter can not transmit to
-      channel X").
+      channel X"). **Exceção**: se o `create_ap` recusar com "adapter
+      can not be a station ... and an AP at the same time" (
+      `WIFI_INTERFACE` associado como cliente Wi-Fi num adaptador que
+      não suporta AP+estação simultâneos — ver item abaixo), o hotspot
+      **não** varre os demais canais nem tenta a banda alternativa:
+      trocar canal/banda nunca resolve essa causa especificamente, só
+      adiaria o mesmo erro por mais tentativas inúteis.
     - **Fallback de banda**: se `WIFI_CHANNEL` **e** `WIFI_FREQ_BAND`
       estiverem ambos em `auto` e nenhum canal da banda escolhida
       funcionar, o hotspot tenta automaticamente a outra banda (todos
@@ -87,30 +93,59 @@ Regras:
     a banda **preferida** para a primeira tentativa — ver fallback de
     banda acima para o que acontece se nenhum canal dela funcionar.
 - **`INTERNET_INTERFACE`** aceita o nome de uma interface fixa ou
-  `auto`: nesse caso o hotspot detecta a interface da rota padrão
-  IPv4 do host (`ip route show default`) e falha explicitamente se
-  nenhuma rota padrão existir — mesma filosofia de nunca adivinhar
-  silenciosamente já usada para canal/banda (`auto` só age quando o
-  valor é explicitamente esse; a variável continua obrigatória e sem
-  fallback quando ausente). `INTERNET_INTERFACE` pode ser a **mesma**
-  interface de `WIFI_INTERFACE` (hotspot e saída de internet pela
-  mesma placa física, modo AP+STA concorrente no mesmo rádio) — o
+  `auto`: nesse caso o hotspot avalia as rotas padrão IPv4 do host
+  (`ip -o route show default`), ignora interfaces virtuais/loopback, e
+  escolhe a interface real com maior velocidade reportada em
+  `/sys/class/net/<iface>/speed`; a métrica da rota desempata. Se não
+  houver rota padrão, tenta interfaces reais `UP`; se ainda assim não
+  encontrar nenhuma candidata, falha explicitamente — mesma filosofia de
+  nunca adivinhar silenciosamente já usada para canal/banda (`auto` só
+  age quando o valor é explicitamente esse; a variável continua
+  obrigatória e sem fallback quando ausente). A interface real escolhida
+  **não é passada diretamente ao `create_ap`**: o hotspot cria uma
+  interface dummy estável (`BINDNET_UPLINK_INTERFACE`, padrão
+  `bn-uplink`) e instala regras próprias em chains `BINDNET-HOTSPOT` de
+  `FORWARD`/`POSTROUTING` para alimentar esse uplink virtual pela fonte
+  real. No modo `auto`, um monitor (`UPLINK_MONITOR_INTERVAL`, padrão
+  10s) reavalia a melhor interface em tempo real e troca somente essas
+  regras, sem derrubar/recriar o AP. `INTERNET_INTERFACE` pode ser a
+  **mesma** interface de `WIFI_INTERFACE` (hotspot e saída de internet
+  pela mesma placa física, modo AP+STA concorrente no mesmo rádio) — o
   hotspot detecta esse caso e loga um aviso citando se `iw phy<N>
   info` reporta suporte a combinações `AP`+`managed` simultâneas, mas
   **nunca bloqueia**: quem decide se funciona de fato é o próprio
-  `create_ap`, exatamente como no retry de canal.
+  `create_ap`, exatamente como no retry de canal. O mesmo vale mesmo
+  quando `WIFI_INTERFACE` já está conectado como estação a **outra**
+  rede (não à internet compartilhada por `INTERNET_INTERFACE`) no
+  momento em que o hotspot sobe: se `iw phy<N> info` reportar a
+  combinação `AP`+`managed`, o `create_ap` cria uma interface virtual
+  (`ap0`) e mantém a conexão de estação existente, só que
+  **sobrescrevendo o canal/banda pedido pelo do rádio já associado**
+  (a combinação normalmente vem com `#channels <= 1` — os dois modos
+  têm que estar na mesma frequência; isso é decisão do próprio
+  `create_ap`, não da seleção de canal do hotspot). A imagem
+  `services/worker/hotspot/Dockerfile` instala o pacote `grep` (GNU
+  grep) especificamente para essa detecção funcionar: o `grep` do
+  BusyBox (padrão do Alpine) não processa a regex que o `create_ap`
+  usa contra a saída de `iw phy info` (`{` sem bound válido) e sempre
+  falha, fazendo o hotspot concluir erroneamente, em qualquer
+  adaptador, que o modo concorrente não é suportado.
 - O painel filtra do seletor de `INTERNET_INTERFACE` (e de
   `WIFI_INTERFACE`) qualquer interface virtual que nunca é uma saída de
   internet real (`docker*`, `br-*` gerada pelo Docker, `veth*`,
-  `virbr*`, `tun*`, `tap*`, `wg*`, `ap0` — a virtual que o próprio
-  `create_ap` cria) — `GET /network/interfaces` (worker) já devolve
-  só interfaces físicas/relevantes.
+  `virbr*`, `tun*`, `tap*`, `wg*`, `bn-*` — uplink dummy Bindnet — e
+  `ap0`, a virtual que o próprio `create_ap` cria) — `GET
+  /network/interfaces` (worker) já devolve só interfaces
+  físicas/relevantes.
 - O hotspot exige que o binário `create_ap` baixado suporte
   `--no-dns` e `--dhcp-dns`; sem isso, falha explicitamente em vez de
   criar um AP com comportamento de DNS inesperado.
 - DNS entregue via DHCP aos clientes do hotspot é sempre o próprio
-  `HOTSPOT_GATEWAY` (o `dns-provider` responde por trás dele) — o
-  hotspot nunca delega DNS para o `create_ap` (`--no-dns`).
+  `HOTSPOT_GATEWAY` em primeiro lugar (o `dns-provider` responde por
+  trás dele), seguido por `HOTSPOT_DNS_FALLBACKS` (padrão
+  `1.1.1.1,8.8.8.8`) para manter navegação externa se o
+  `dns-provider` reiniciar ou ainda não estiver escutando. O hotspot
+  nunca delega DNS para o `create_ap` (`--no-dns`).
 - O DHCP do hotspot também anuncia `domain-search` para os TLDs locais
   (`DNS_SEARCH_DOMAINS`, ou `DNS_LOCAL_TLDS` quando ausente). Isso é
   necessário para clientes como Ubuntu/systemd-resolved rotearem
@@ -122,7 +157,7 @@ Regras:
 - O container precisa rodar `privileged: true` e `network_mode: host`
   porque manipula diretamente a interface Wi-Fi física do host.
 
-## Ligar/desligar o hotspot pelo painel (`POST /api/hotspot/start` / `/stop`)
+## Ligar/desligar/recuperar o hotspot pelo painel (`POST /api/hotspot/start` / `/stop` / `/recover-wifi`)
 
 Não existem mais scripts de shell separados (`scripts/hotspot-on.sh` /
 `hotspot-off.sh`, removidos) — ligar/desligar o hotspot é feito
@@ -133,29 +168,77 @@ scripts tinham, só que dentro do container privilegiado em vez de
 `sudo` no host:
 
 - `POST /api/hotspot/start`:
-  1. Marca `WIFI_INTERFACE` (e `ap0`) como **não gerenciada** pelo
-     NetworkManager, via drop-in em
-     `/etc/NetworkManager/conf.d/90-bindnet-hotspot-unmanaged.conf`
-     (`worker`: `POST /network/wifi-unmanage`), para o `hostapd`
-     (dentro do `create_ap`) poder assumir a placa.
-  2. Sobe `hotspot` + `dns-provider` via `docker compose up -d
-     --no-build` (`worker`: `POST /hotspot/apply`) — cria os
-     containers se ainda não existirem (1ª subida) e também os recria
-     se o `.env` mudou, não apenas `docker start`.
+  1. Sobe `hotspot` + `dns-provider` via `docker compose up -d
+     --no-build --no-deps` usando diretamente
+     `docker-compose.services.yml` (`worker`: `POST /hotspot/apply`) —
+     cria os containers se ainda não existirem (1ª subida) e também os
+     recria se o `.env` mudou, não apenas `docker start`, sem acionar o
+     job `migration` nem o `docker-compose.yml` agregador.
+  2. O container `hotspot` deixa a `WIFI_INTERFACE` física sob controle
+     do NetworkManager e delega ao `create_ap` a criação da interface
+     AP virtual (`ap0`) quando o adaptador suporta AP+STA. A fonte de
+     internet entregue ao `create_ap` é sempre o uplink virtual
+     `BINDNET_UPLINK_INTERFACE`, alimentado por regras Bindnet de
+     NAT/forward a partir da interface real configurada.
 - `POST /api/hotspot/stop` desfaz exatamente o inverso, na ordem
   inversa:
   1. Para `hotspot` + `dns-provider` (`docker stop`, via `worker`).
-  2. Remove o drop-in do NetworkManager e devolve `WIFI_INTERFACE` ao
-     controle do NetworkManager (`worker`: `POST /network/wifi-manage`,
-     que roda `nmcli device set ... managed yes`).
+  2. Garante que qualquer drop-in antigo do NetworkManager seja removido
+     e devolve `WIFI_INTERFACE` ao controle do NetworkManager
+     (`worker`: `POST /network/wifi-manage`, que roda `nmcli device set
+     ... managed yes`). O container também remove `bn-uplink` e as
+     chains `BINDNET-HOTSPOT` ao sair.
+- `POST /api/hotspot/recover-wifi` é a ação operacional do botão
+  "Recuperar Wi-Fi" na tela "Hotspot Wi-Fi": repete a etapa segura de
+  parada e devolução da placa ao NetworkManager quando a interface ficou
+  presa como não gerenciada após queda/restart/interrupção fora do fluxo
+  normal.
 - `WIFI_INTERFACE` vem da seção `hotspot` do `.env` (via `worker`); se
   não estiver definida, a requisição falha explicitamente (sem
   fallback silencioso para uma interface adivinhada).
 - Essas operações mexem em configuração real do host (NetworkManager,
-  placa Wi-Fi física) — o mesmo cuidado que se aplicava aos scripts
-  antigos se aplica aos botões "Iniciar"/"Parar" do painel: iniciar o
-  hotspot desconecta a placa Wi-Fi do uso normal como cliente; "Parar"
-  é o único caminho suportado para reverter isso de forma limpa.
+  placa Wi-Fi física, `iptables` e interface dummy `bn-uplink`). O
+  fluxo suportado é iniciar/parar pelo painel; "Recuperar Wi-Fi" fica
+  como ação segura para limpar estados antigos ou interrupções fora do
+  fluxo normal.
+
+## Clientes do hotspot: identificação e bloqueio por MAC (`services/backend/hotspot_devices.go`)
+
+- `GET /api/hotspot/clients` continua vindo de `create_ap --list-clients`
+  (via `worker`), mas agora cada cliente é enriquecido com dados
+  cacheados na tabela `hotspot_device_info` (fabricante/tipo/SO
+  aproximados) e uma flag `blocked` cruzada com `hotspot_blocked_devices`.
+  O enriquecimento nunca é automático a cada poll (a tela reconsulta a
+  cada 5s) — só acontece sob demanda.
+- `POST /api/hotspot/clients/{mac}/identify` dispara a identificação:
+  1. Busca o fingerprint DHCP do dispositivo (opções pedidas + vendor
+     class) via `worker`: `GET /hotspot/fingerprint` — lê
+     `/tmp/bindnet-dnsmasq-dhcp.log`, caminho fixo que
+     `services/worker/hotspot/patch-create-ap.sh` força no
+     `dnsmasq.conf` gerado pelo `create_ap` (`log-dhcp` +
+     `log-facility`), já que o `CONFDIR` original tem sufixo aleatório
+     por execução.
+  2. Descobre o fabricante via `api.macvendors.com` (MAC → nome do
+     fabricante); se a chamada externa falhar ou não tiver rede, cai
+     para uma base OUI local (`BINDNET_OUI_DB_PATH`, opcional) e por
+     fim uma tabela mínima embutida no binário — nunca quebra a tela
+     por falta de internet.
+  3. Estima tipo de dispositivo/SO por heurística local (substring em
+     hostname/fabricante/vendor class DHCP - ver
+     `inferHotspotDeviceProfile`) — é uma aproximação com nível de
+     confiança (`confidence`), não uma identificação garantida.
+  4. Resultado fica em cache (`hotspot_device_info`, por MAC) até o
+     operador pedir de novo.
+- `GET/POST /api/hotspot/blocklist` e `DELETE
+  /api/hotspot/blocklist/{mac}` gerenciam a tabela
+  `hotspot_blocked_devices`. Bloquear/desbloquear tem efeito imediato
+  via `hostapd_cli deny_acl ADD_MAC`/`DEL_MAC` (+ `deauthenticate` no
+  bloqueio) no `worker` (`services/worker/controller/hotspot_acl.go`)
+  — não precisa reiniciar o hotspot. Essa ACL só existe na memória do
+  `hostapd`: some a cada restart do container, por isso `POST
+  /api/hotspot/start` e `POST /api/hotspot/apply` sempre reaplicam a
+  blocklist inteira depois de subir o hotspot (com retry curto,
+  já que o `hostapd` leva alguns segundos para ficar pronto).
 
 ## Serviço `dns-provider` (servidor DNS split-horizon próprio — `services/worker/dns/`)
 
@@ -332,6 +415,13 @@ Regras:
   na tabela `certificates` — sem cache/reuso por domínio, já que
   emitir é agora uma ação explícita do usuário, não um lookup
   implícito por SNI.
+- Após persistir no Postgres, o backend importa o certificado para o
+  `nginx-ui`, para que ele apareça em
+  `/#/certificates/list?search={}`. Se `NGINX_UI_USERNAME` e
+  `NGINX_UI_PASSWORD` estiverem preenchidos, usa a API `/api/certs`;
+  caso contrário, grava os PEMs em `/etc/nginx/ssl/<domínio>/` e
+  registra a linha correspondente no `database.db` do `nginx-ui` via os
+  volumes compartilhados.
 - O nome do domínio é normalizado antes de emitir: minúsculas, sem
   porta, sem `.` final; se não passar numa validação básica de
   caracteres (`[a-z0-9-]` por rótulo), cai para `localhost.local` em
@@ -339,11 +429,38 @@ Regras:
   do antigo `cert-proxy`.
 - `DELETE /api/certificates/{id}` revoga: seta `revoked_at`, **nunca
   deleta a linha** — o certificado revogado continua aparecendo na
-  listagem, com status "revogado".
+  listagem dedicada de revogados do Bindnet, com status "revogado", e
+  sai da lista principal de certificados emitidos. A mesma chamada
+  remove o certificado da lista do `nginx-ui` e limpa os PEMs importados
+  em `/etc/nginx/ssl/<domínio>/`.
+- `DELETE /api/certificates/{id}/permanent` elimina definitivamente
+  uma linha **somente se ela já estiver revogada**; certificados ativos
+  precisam passar primeiro pela revogação para sair do `nginx-ui`.
 - `GET /api/certificates/ca` e `GET /api/certificates/{id}/download`
-  servem os PEMs para download. **Todas** as rotas de
-  `/api/certificates/*` exigem sessão autenticada — diferente do
-  antigo `cert-proxy`, que servia `/ca.crt` anonimamente na porta 80.
+  servem os PEMs para download e exigem sessão autenticada, igual às
+  demais rotas de `/api/certificates/*`. **Exceção deliberada**:
+  `GET /api/mesh/ca` devolve o mesmo PEM da CA (só o certificado
+  público, nunca a chave privada) **sem sessão**, com
+  `Access-Control-Allow-Origin: *` — usada pela tela "Servidores
+  Bindnet" do painel (`services/frontend/src/components/bindnets/`)
+  para buscar a CA de outros nós da malha direto do navegador, sem
+  autenticação entre backends. É seguro porque uma CA raiz é feita
+  para ser distribuída publicamente (mesmo papel do antigo
+  `cert-proxy`, que servia `/ca.crt` anonimamente na porta 80 — só que
+  agora escopado só a essa rota, em vez de todo o cert-proxy).
+- `POST /api/certificates/ca/install-local` instala uma CA no próprio
+  host Linux onde o stack está rodando. Por padrão usa a CA deste
+  backend; aceita um corpo opcional `{"certificatePem": "..."}` para
+  instalar a CA de **outro** servidor Bindnet (buscada via
+  `GET /api/mesh/ca` dele) — usado pelo card de CA de nós remotos em
+  "Servidores Bindnet". Em qualquer um dos casos o backend só repassa
+  o PEM para o `worker`; o `worker` valida que é uma CA, grava
+  `/usr/local/share/ca-certificates/bindnet-local-ca.crt` e executa a
+  ação fixa `update-ca-certificates` (mais a importação nas stores
+  NSS do Chrome/Chromium e Firefox de cada usuário do host, ver
+  `services/worker/controller/browser_trust.go`). Essa rota não aceita
+  caminho nem comando vindo do frontend/backend, só o conteúdo do
+  certificado.
 - A chave privada da CA (`private_key_pem` na tabela `ca`) fica no
   `postgres_data` — apagar/recriar esse volume tem o mesmo
   efeito que apagar o antigo `cert_proxy_data`: invalida a CA e todos
@@ -359,7 +476,9 @@ Regras:
   para a instalação do Nginx UI aceitar esse desenho de segurança.
 - Estado (configuração de sites, dados da UI, arquivos servidos) é
   persistido nos volumes externos `nginx_config`, `nginx_ui_data` e
-  `www_data` — esses volumes **não** são gerenciados pelo
+  `www_data`. O backend também monta `nginx_config` e `nginx_ui_data`
+  com escrita para importar os certificados emitidos no painel Bindnet
+  para a lista do `nginx-ui`. Esses volumes **não** são gerenciados pelo
   `docker-compose.yml` (são `external: true`) e precisam existir antes
   do primeiro `docker compose up` (ver README).
 
@@ -407,6 +526,7 @@ Regras:
 
 - **`worker`** é o único serviço com acesso privilegiado ao host
   (`/var/run/docker.sock`, `/run/dbus`, `/etc/NetworkManager/conf.d`,
+  `/usr/local/share/ca-certificates`, `/etc/ssl/certs`,
   `network_mode: host`). Sua API interna (servida só via socket Unix
   em `worker_ipc`, sem porta TCP) opera com uma lista fechada de
   serviços permitidos (`hotspot`, `dns-provider`, `nginx-ui`,

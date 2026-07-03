@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -25,9 +26,10 @@ func registerNetworkRoutes(mux *http.ServeMux) {
 }
 
 type interfaceInfo struct {
-	Name  string `json:"name"`
-	Type  string `json:"type"` // "wifi" | "other"
-	State string `json:"state"`
+	Name      string `json:"name"`
+	Type      string `json:"type"` // "wifi" | "other"
+	State     string `json:"state"`
+	SpeedMbps int    `json:"speedMbps,omitempty"`
 }
 
 // virtualInterfacePrefixes cobre interfaces que o Docker/kernel criam
@@ -35,12 +37,12 @@ type interfaceInfo struct {
 // (com hifen) e deliberado: so bate no padrao que o Docker gera pra
 // redes customizadas (br-<12 hex>), nao numa bridge manual como "br0"
 // que o usuario poderia escolher de proposito.
-var virtualInterfacePrefixes = []string{"docker", "br-", "veth", "virbr", "tun", "tap", "wg"}
+var virtualInterfacePrefixes = []string{"docker", "br-", "veth", "virbr", "tun", "tap", "wg", "bn-"}
 
 // isVirtualInterface filtra interfaces que nao fazem sentido nos
 // seletores de WIFI_INTERFACE/INTERNET_INTERFACE do painel: "lo"
 // (loopback) e "ap0" (interface virtual que o create_ap cria) alem das
-// interfaces geradas por Docker/VPN/bridge listadas acima.
+// interfaces geradas por Docker/VPN/bridge e do uplink dummy Bindnet.
 func isVirtualInterface(name string) bool {
 	if name == "lo" || name == "ap0" {
 		return true
@@ -94,10 +96,27 @@ func handleInterfaces(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(line, "UP") {
 			state = "up"
 		}
-		interfaces = append(interfaces, interfaceInfo{Name: name, Type: ifaceType, State: state})
+		interfaces = append(interfaces, interfaceInfo{
+			Name:      name,
+			Type:      ifaceType,
+			State:     state,
+			SpeedMbps: interfaceSpeedMbps(name),
+		})
 	}
 
 	_ = json.NewEncoder(w).Encode(interfaces)
+}
+
+func interfaceSpeedMbps(name string) int {
+	data, err := os.ReadFile("/sys/class/net/" + name + "/speed")
+	if err != nil {
+		return 0
+	}
+	var speed int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &speed); err != nil || speed <= 0 {
+		return 0
+	}
+	return speed
 }
 
 type interfaceRequest struct {
@@ -116,13 +135,25 @@ func handleWifiUnmanage(w http.ResponseWriter, r *http.Request) {
 
 	content := fmt.Sprintf("[keyfile]\nunmanaged-devices=interface-name:%s;interface-name:ap0\n", req.Interface)
 	if err := os.WriteFile(nmDropin, []byte(content), 0644); err != nil {
+		log.Printf("[worker] erro ao escrever %s: %v", nmDropin, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if output, err := exec.Command("nmcli", "general", "reload", "conf").CombinedOutput(); err != nil {
+	reloadOutput, reloadErr := reloadNetworkManagerConfig()
+	if reloadErr != nil {
+		log.Printf("[worker] aviso: 'nmcli general reload conf' falhou; tentando aplicar estado runtime mesmo assim: %v (%s)", reloadErr, reloadOutput)
+	}
+	if output, err := setDeviceManaged(req.Interface, false); err != nil {
+		log.Printf("[worker] erro ao rodar 'nmcli device set %s managed no': %v (%s)", req.Interface, err, output)
+		if reloadErr != nil {
+			http.Error(w, fmt.Sprintf("%s\n%s", strings.TrimSpace(string(reloadOutput)), strings.TrimSpace(string(output))), http.StatusInternalServerError)
+			return
+		}
 		http.Error(w, string(output), http.StatusInternalServerError)
 		return
 	}
+	// ap0 pode nao existir ainda; se existir, tambem fica fora do NetworkManager.
+	_, _ = setDeviceManaged("ap0", false)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -136,16 +167,33 @@ func handleWifiManage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = os.Remove(nmDropin)
-	if output, err := exec.Command("nmcli", "general", "reload", "conf").CombinedOutput(); err != nil {
-		http.Error(w, string(output), http.StatusInternalServerError)
-		return
+	reloadOutput, reloadErr := reloadNetworkManagerConfig()
+	if reloadErr != nil {
+		log.Printf("[worker] aviso: 'nmcli general reload conf' falhou; tentando devolver %s mesmo assim: %v (%s)", req.Interface, reloadErr, reloadOutput)
 	}
-	output, err := exec.Command("nmcli", "device", "set", req.Interface, "managed", "yes").CombinedOutput()
+	output, err := setDeviceManaged(req.Interface, true)
 	if err != nil {
+		log.Printf("[worker] erro ao rodar 'nmcli device set %s managed yes': %v (%s)", req.Interface, err, output)
+		if reloadErr != nil {
+			http.Error(w, fmt.Sprintf("%s\n%s", strings.TrimSpace(string(reloadOutput)), strings.TrimSpace(string(output))), http.StatusInternalServerError)
+			return
+		}
 		http.Error(w, string(output), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func reloadNetworkManagerConfig() ([]byte, error) {
+	return exec.Command("nmcli", "general", "reload", "conf").CombinedOutput()
+}
+
+func setDeviceManaged(iface string, managed bool) ([]byte, error) {
+	value := "no"
+	if managed {
+		value = "yes"
+	}
+	return exec.Command("nmcli", "device", "set", iface, "managed", value).CombinedOutput()
 }
 
 type dnsTestRequest struct {

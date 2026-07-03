@@ -6,6 +6,8 @@ import { DashboardPage } from "@/pages/Dashboard";
 import { HotspotPage } from "@/pages/Hotspot";
 import { DnsPage } from "@/pages/Dns";
 import { CertificatesPage } from "@/pages/Certificates";
+import { BindnetsPage } from "@/pages/Bindnets";
+import { BindnetDetailPage } from "@/pages/BindnetDetail";
 
 export default function App() {
   return (
@@ -21,6 +23,8 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="hotspot" element={<HotspotPage />} />
         <Route path="dns" element={<DnsPage />} />
+        <Route path="bindnets" element={<BindnetsPage />} />
+        <Route path="bindnets/:nodeId" element={<BindnetDetailPage />} />
         <Route path="certificates" element={<CertificatesPage />} />
       </Route>
     </Routes>
