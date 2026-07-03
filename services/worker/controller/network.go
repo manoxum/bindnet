@@ -154,6 +154,17 @@ func handleWifiUnmanage(w http.ResponseWriter, r *http.Request) {
 	}
 	// ap0 pode nao existir ainda; se existir, tambem fica fora do NetworkManager.
 	_, _ = setDeviceManaged("ap0", false)
+	// "managed no" so impede o NetworkManager de gerenciar a interface
+	// dali pra frente - se ela ja estava associada como cliente a uma
+	// rede Wi-Fi, a associacao continua ativa. Com a placa ainda
+	// ocupada como estacao, o create_ap falha ao criar a interface AP
+	// virtual em qualquer canal/banda ("RTNETLINK answers: Resource
+	// busy"), porque o driver nao aceita uma segunda interface virtual
+	// enquanto a fisica esta associada. Desconectar aqui garante que a
+	// placa esteja livre antes do hotspot tentar assumi-la.
+	if output, err := disconnectDevice(req.Interface); err != nil {
+		log.Printf("[worker] aviso: 'nmcli device disconnect %s' falhou (pode ja estar desconectado): %v (%s)", req.Interface, err, output)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -194,6 +205,13 @@ func setDeviceManaged(iface string, managed bool) ([]byte, error) {
 		value = "yes"
 	}
 	return exec.Command("nmcli", "device", "set", iface, "managed", value).CombinedOutput()
+}
+
+// disconnectDevice desassocia a interface de qualquer rede Wi-Fi a que
+// ela esteja conectada como cliente. Erro aqui e esperado/inofensivo
+// quando a interface ja estava desconectada.
+func disconnectDevice(iface string) ([]byte, error) {
+	return exec.Command("nmcli", "device", "disconnect", iface).CombinedOutput()
 }
 
 type dnsTestRequest struct {
