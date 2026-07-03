@@ -57,11 +57,12 @@ arquivos provisionado para uso futuro (MinIO).
   (não usa CoreDNS): resolve TLDs locais (`DNS_LOCAL_TLDS`) de forma
   diferente conforme quem pergunta (host/container/hotspot, ver
   [RULE.md](RULE.md)), usa `server_name` declarados no nginx-ui como
-  anúncios locais, e trata zonas de discover (`DOMAINS`) como uma
-  malha de roteamento por próximo salto entre servidores Bindnet
-  vizinhos (`DISCOVER_PEERS`): domínio local resolve normalmente,
-  domínio remoto conhecido é encaminhado (proxy real) para o próximo
-  salto, e o resto é encaminhado para DNS público.
+  anúncios locais, trata zonas concretas de discover (`DOMAINS`, ex.:
+  `costa.bnet`) como domínios locais anunciados aos peers, e roteia
+  domínios remotos conhecidos por próximo salto entre servidores
+  Bindnet vizinhos cadastrados no Postgres pelo painel: domínio local resolve
+  normalmente, domínio remoto conhecido é encaminhado (proxy real) para
+  o próximo salto, e o resto é encaminhado para DNS público.
 - **nginx-ui** — interface de administração para configurar sites,
   acessível só pela porta administrativa `:9080` (nada mais faz proxy
   público nas portas 80/443 neste stack). Não recebe
@@ -213,10 +214,10 @@ Resumo das mais relevantes:
 | `WIFI_FREQ_BAND` | não | `auto` | `2.4`, `5` ou seleção automática por capacidade da placa |
 | `HOTSPOT_GATEWAY` | não | `192.168.12.1` | IP do hotspot na rede local |
 | `HOTSPOT_DNS_FALLBACKS` | não | `1.1.1.1,8.8.8.8` | DNS públicos entregues depois do gateway Bindnet no DHCP, para navegação continuar se o `dns-provider` reiniciar |
-| `DOCKER_HOST_GATEWAY` | não | — | IP do host visto pelos containers (bind extra do DNS) |
+| `HOST_SOURCE_CIDR` | não | vazio | IP/CIDR da interface LAN onde o `dns-provider` escuta consultas encaminhadas por peers Bindnet |
 | `DNS_LOCAL_TLDS` | não | `local,test,example` | TLDs resolvidos como locais pelo `dns-provider` |
-| `DOMAINS` | não | vazio | TLDs/zonas que participam do discover mode por próximo salto |
-| `DISCOVER_PEERS` | não | vazio | servidores Bindnet vizinhos diretos (`host:porta`) para troca de rotas |
+| `DOMAINS` | não | vazio | TLDs/raízes amplas ou zonas concretas que participam do discover mode; zonas concretas como `costa.bnet` são anunciadas como locais |
+| `DISCOVER_REMOTE_ROUTES` | não | `auto` | `auto` aprende vizinhos remotos anunciados pelo peer direto; `manual` exige adicionar esses vizinhos pelo painel |
 | `DISCOVER_NODE_NAME` | não | hostname do container | nome deste servidor na malha de descoberta |
 | `DISCOVER_PORT` | não | `8531` | porta HTTP onde este nó expõe sua tabela de rotas aos peers |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | sim (criação/atualização) | — | credenciais do painel web |
@@ -322,10 +323,11 @@ CLAUDE.md                   # diretrizes para ferramentas de IA neste repo
   na tela "Hotspot Wi-Fi", clique em "Recuperar Wi-Fi". O painel para
   `hotspot`/`dns-provider`, recarrega o NetworkManager e devolve
   `WIFI_INTERFACE` ao controle normal do sistema.
-- **`dns-provider` não sobe / fica esperando IPs**: ele espera
-  `127.0.0.1` e `DOCKER_HOST_GATEWAY` existirem como IPs na máquina
-  antes de iniciar. O listener de `HOTSPOT_GATEWAY` é aberto depois,
-  automaticamente, quando o hotspot criar esse IP.
+- **`dns-provider` não sobe / fica esperando IPs**: ele detecta os
+  gateways das bridges Docker existentes no host, lê os IPs de
+  `HOST_SOURCE_CIDR`, espera esses IPs e `127.0.0.1` existirem como IPs
+  na máquina antes de iniciar. O listener de `HOTSPOT_GATEWAY` é aberto
+  depois, automaticamente, quando o hotspot criar esse IP.
 - **Domínio local não resolve no host**: confirme que o resolver do
   sistema está apontando `127.0.0.1` para os TLDs de `DNS_LOCAL_TLDS`
   (ex: `systemd-resolved` com drop-in dedicado).
@@ -334,7 +336,7 @@ CLAUDE.md                   # diretrizes para ferramentas de IA neste repo
   `sudo scripts/configure-docker-dns.sh` e depois reinicie o Docker. Sem
   isso, o DNS embutido do Docker (`127.0.0.11`) encaminha para o
   resolver do host e recebe a resposta da view host (`127.x.y.z`) em
-  vez da view container (`DOCKER_HOST_GATEWAY`).
+  vez da view container (gateway Docker detectado no host).
 - **`backend` não sobe / erro "ADMIN_USERNAME e ADMIN_PASSWORD são
   obrigatórios"**: defina essas variáveis no `.env.main` para criar o
   primeiro usuário administrador. Depois disso, manter ambas definidas

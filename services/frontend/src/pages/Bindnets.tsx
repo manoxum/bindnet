@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, RadioTower, Server, ServerCog, Unplug } from "lucide-react";
+import { ChevronRight, Fingerprint, Globe2, RadioTower, Server, ServerCog, Unplug } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -77,6 +77,8 @@ export function BindnetsPage() {
         {nodes.map((node) => {
           const services = data ? serviceRowsForNode(node, data).length : 0;
           const via = node.kind === "inferred" ? "aprendido por rota" : node.source;
+          const domains = node.domains?.slice(0, 2).join(", ") || "sem domínio anunciado";
+          const fingerprint = node.fingerprint ? node.fingerprint.slice(0, 12) : "sem fingerprint";
           return (
             <div
               key={node.id}
@@ -115,6 +117,16 @@ export function BindnetsPage() {
                   )}
                 </div>
               </div>
+              <div className="mt-4 grid gap-2 text-xs text-muted-foreground">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Globe2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{domains}</span>
+                </div>
+                <div className="flex min-w-0 items-center gap-2">
+                  <Fingerprint className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{fingerprint}</span>
+                </div>
+              </div>
               <Separator className="my-4" />
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{via}</span>
@@ -131,7 +143,7 @@ export function BindnetsPage() {
         title="Desvincular servidor"
         description={
           unlinkTarget
-            ? `Remover ${unlinkTarget.address} de DISCOVER_PEERS e aplicar a configuração de DNS agora.`
+            ? `Remover ${unlinkTarget.address} dos peers diretos e aplicar a configuração de DNS agora.`
             : undefined
         }
         confirmLabel="Desvincular"

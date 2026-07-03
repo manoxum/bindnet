@@ -18,7 +18,7 @@ func waitForIPs(ips []string, timeout time.Duration) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("IPs ainda ausentes apos %s: %v (verifique se o hotspot subiu e se DOCKER_HOST_GATEWAY/HOTSPOT_GATEWAY estao corretos)", timeout, missing)
+			return fmt.Errorf("IPs ainda ausentes apos %s: %v (verifique se o hotspot subiu e se as bridges Docker/HOST_SOURCE_CIDR/HOTSPOT_GATEWAY estao corretos)", timeout, missing)
 		}
 		time.Sleep(2 * time.Second)
 	}

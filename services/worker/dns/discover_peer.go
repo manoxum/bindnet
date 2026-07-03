@@ -15,9 +15,16 @@ import (
 // recebe; "nextHop"/"source"/"state" sao sempre recalculados
 // localmente por quem recebe, nunca repassados como vieram.
 type advertisedRoute struct {
-	Domain   string `json:"domain"`
-	Owner    string `json:"owner"`
-	Distance int    `json:"distance"`
+	Domain           string `json:"domain"`
+	Owner            string `json:"owner"`
+	OwnerFingerprint string `json:"ownerFingerprint,omitempty"`
+	Distance         int    `json:"distance"`
+}
+
+type discoverInfo struct {
+	NodeName    string   `json:"nodeName"`
+	Fingerprint string   `json:"fingerprint"`
+	Domains     []string `json:"domains"`
 }
 
 // ownRoutes calcula quais dominios este no anuncia como dono direto
@@ -29,17 +36,27 @@ func ownRoutes(cfg *dnsConfig) map[string]discoveredRoute {
 	owned := map[string]discoveredRoute{}
 	now := time.Now()
 
+	addOwned := func(name string) {
+		owned[name] = discoveredRoute{
+			Domain:           name,
+			Owner:            cfg.nodeName,
+			OwnerFingerprint: cfg.fingerprint,
+			Distance:         0,
+			Source:           "self",
+			State:            routeStateOK,
+			LastSeen:         now,
+		}
+	}
+
 	addIfInMesh := func(name string) {
 		if _, ok := suffixZoneFor(strings.Split(name, "."), cfg.domainZones); !ok {
 			return
 		}
-		owned[name] = discoveredRoute{
-			Domain:   name,
-			Owner:    cfg.nodeName,
-			Distance: 0,
-			Source:   "self",
-			State:    routeStateOK,
-			LastSeen: now,
+		addOwned(name)
+	}
+	for zone := range cfg.domainZones {
+		if isConcreteOwnedDomainZone(zone) {
+			addOwned(zone)
 		}
 	}
 	for host := range cfg.nginxHosts {
@@ -58,14 +75,27 @@ func ownRoutes(cfg *dnsConfig) map[string]discoveredRoute {
 // foi ele quem a anunciou).
 func advertisedRoutesFor(cfg *dnsConfig, requesterIP string) []advertisedRoute {
 	var result []advertisedRoute
+	seen := map[string]bool{}
+	add := func(route discoveredRoute) {
+		if seen[route.Domain] {
+			return
+		}
+		seen[route.Domain] = true
+		result = append(result, advertisedRoute{
+			Domain:           route.Domain,
+			Owner:            route.Owner,
+			OwnerFingerprint: route.OwnerFingerprint,
+			Distance:         route.Distance,
+		})
+	}
 	for _, route := range ownRoutes(cfg) {
-		result = append(result, advertisedRoute{Domain: route.Domain, Owner: route.Owner, Distance: route.Distance})
+		add(route)
 	}
 	for _, route := range cfg.routes.snapshot() {
 		if requesterIP != "" && hostOf(route.Source) == requesterIP {
 			continue
 		}
-		result = append(result, advertisedRoute{Domain: route.Domain, Owner: route.Owner, Distance: route.Distance})
+		add(route)
 	}
 	return result
 }
@@ -83,11 +113,18 @@ func hostOf(addr string) string {
 
 // startDiscoverServer expoe a tabela de rotas deste no para os peers -
 // unico servidor HTTP do dns-provider, que ate aqui so tinha sockets
-// UDP:53. Sobe mesmo sem nenhum DISCOVER_PEERS configurado, porque um
-// no "folha" ainda precisa responder quando outro no o lista como
-// vizinho.
+// UDP:53. Sobe mesmo sem peer direto configurado, porque um no "folha"
+// ainda precisa responder quando outro no o lista como vizinho.
 func startDiscoverServer(cfg *dnsConfig, port string) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /discover/info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(discoverInfo{
+			NodeName:    cfg.nodeName,
+			Fingerprint: cfg.fingerprint,
+			Domains:     zoneNames(cfg.domainZones),
+		})
+	})
 	mux.HandleFunc("GET /discover/routes", func(w http.ResponseWriter, r *http.Request) {
 		requesterIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")

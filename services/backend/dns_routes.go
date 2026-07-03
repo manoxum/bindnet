@@ -12,19 +12,20 @@ import (
 )
 
 type discoverRoute struct {
-	Domain     string `json:"domain"`
-	Owner      string `json:"owner"`
-	NextHop    string `json:"nextHop"`
-	Distance   int    `json:"distance"`
-	Source     string `json:"source"`
-	State      string `json:"state"`
-	LastSeenAt string `json:"lastSeenAt"`
+	Domain           string `json:"domain"`
+	Owner            string `json:"owner"`
+	OwnerFingerprint string `json:"ownerFingerprint,omitempty"`
+	NextHop          string `json:"nextHop"`
+	Distance         int    `json:"distance"`
+	Source           string `json:"source"`
+	State            string `json:"state"`
+	LastSeenAt       string `json:"lastSeenAt"`
 }
 
 func registerDNSRouteRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB, audit *auditClient) {
 	mux.HandleFunc("GET /api/dns/routes", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.QueryContext(r.Context(), `
-			SELECT domain, owner, next_hop, distance, source, state, last_seen_at
+			SELECT domain, owner, COALESCE(owner_fingerprint, ''), next_hop, distance, source, state, last_seen_at
 			FROM discover_routes ORDER BY domain
 		`)
 		if err != nil {
@@ -36,7 +37,7 @@ func registerDNSRouteRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB
 		routes := []discoverRoute{}
 		for rows.Next() {
 			var route discoverRoute
-			if err := rows.Scan(&route.Domain, &route.Owner, &route.NextHop, &route.Distance, &route.Source, &route.State, &route.LastSeenAt); err != nil {
+			if err := rows.Scan(&route.Domain, &route.Owner, &route.OwnerFingerprint, &route.NextHop, &route.Distance, &route.Source, &route.State, &route.LastSeenAt); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}

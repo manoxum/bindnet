@@ -105,17 +105,10 @@ func zoneNames(zones map[string]bool) []string {
 	return names
 }
 
-// parsePeers separa DISCOVER_PEERS em enderecos "host:porta" individuais
-// - sem validacao de formato pesada, cada endereco e usado como esta em
-// chamadas HTTP para o peer (ver discover_peer.go).
-func parsePeers(raw string) []string {
-	var peers []string
-	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' || r == ' ' }) {
-		peer := strings.TrimSpace(part)
-		if peer == "" {
-			continue
-		}
-		peers = append(peers, peer)
+func normalizeRemoteRouteMode(raw string) string {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	if mode == "manual" {
+		return "manual"
 	}
-	return peers
+	return "auto"
 }

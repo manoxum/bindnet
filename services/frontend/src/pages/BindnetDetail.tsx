@@ -153,7 +153,7 @@ export function BindnetDetailPage() {
         open={unlinkOpen}
         onOpenChange={setUnlinkOpen}
         title="Desvincular servidor"
-        description={`Remover ${node.address} de DISCOVER_PEERS e aplicar a configuração de DNS agora.`}
+        description={`Remover ${node.address} dos peers diretos e aplicar a configuração de DNS agora.`}
         confirmLabel="Desvincular"
         variant="destructive"
         pending={unlinkPeer.isPending}

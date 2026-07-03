@@ -1,4 +1,4 @@
-import { Clock, Radar, Tag, type LucideIcon } from "lucide-react";
+import { Clock, Fingerprint, Globe2, Network, Radar, Tag, type LucideIcon } from "lucide-react";
 import { formatSeen, nodeLabel, type BindnetNode, type metricCards } from "@/lib/mesh";
 
 interface BindnetOverviewTabProps {
@@ -21,6 +21,10 @@ function OverviewItem({ icon: Icon, label, value }: { icon: LucideIcon; label: s
 }
 
 export function BindnetOverviewTab({ node, metrics }: BindnetOverviewTabProps) {
+  const domains = node.domains?.length ? node.domains.join(", ") : "sem domínio anunciado";
+  const fingerprint = node.fingerprint || "ainda não informado";
+  const endpoint = node.port ? `${node.host ?? node.address}:${node.port}` : node.host || node.address;
+
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
@@ -33,10 +37,13 @@ export function BindnetOverviewTab({ node, metrics }: BindnetOverviewTabProps) {
         ))}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <OverviewItem icon={Tag} label="Tipo" value={nodeLabel(node.kind)} />
         <OverviewItem icon={Radar} label="Origem" value={node.source} />
         <OverviewItem icon={Clock} label="Última leitura" value={formatSeen(node.lastSeenAt)} />
+        <OverviewItem icon={Network} label="IP / porta" value={endpoint} />
+        <OverviewItem icon={Fingerprint} label="Fingerprint" value={fingerprint} />
+        <OverviewItem icon={Globe2} label="Domínios" value={domains} />
       </div>
     </div>
   );

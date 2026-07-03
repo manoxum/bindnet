@@ -12,7 +12,8 @@ const (
 	staleAfter   = 3 * pollInterval
 )
 
-// pollPeers roda para sempre, consultando cada DISCOVER_PEERS a cada
+// pollPeers roda para sempre, consultando cada peer direto configurado
+// no Postgres a cada
 // pollInterval e substituindo o snapshot em memoria da tabela de
 // descoberta - nunca bloqueia o caminho de resolucao DNS, que so le o
 // snapshot mais recente via routeTable.lookup.
@@ -35,7 +36,8 @@ func pollOnce(cfg *dnsConfig) {
 		previous[route.Domain] = route
 	}
 
-	for _, peer := range effectivePeers(cfg) {
+	peers := effectivePeers(cfg)
+	for _, peer := range peers {
 		advertised, err := fetchRoutes(peer)
 		if err != nil {
 			log.Printf("[dns-provider] aviso: falha ao consultar peer de descoberta %s: %v", peer, err)
@@ -44,33 +46,30 @@ func pollOnce(cfg *dnsConfig) {
 		mergeAdvertised(cfg, updated, peer, advertised)
 	}
 
-	markStaleOrCarryOver(previous, updated)
+	markStaleOrCarryOver(previous, updated, peers)
 	cfg.routes.replace(updated)
 	persistSnapshot(cfg, updated)
 }
 
-// effectivePeers combina os peers configurados manualmente
-// (DISCOVER_PEERS, alcancam qualquer rede) com os auto-descobertos por
-// multicast na rede local (discover_broadcast.go, expiram se pararem
-// de anunciar), sem duplicar enderecos.
+// effectivePeers devolve apenas os peers configurados pelo operador no
+// banco. A busca de novos peers e uma acao explicita do painel; nenhum
+// servidor entra na malha so por ter sido visto na rede.
 func effectivePeers(cfg *dnsConfig) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	configured, err := loadConfiguredPeers(ctx, cfg.db)
+	if err != nil {
+		log.Printf("[dns-provider] aviso: falha ao carregar peers configurados: %v", err)
+		return nil
+	}
 	seen := map[string]bool{}
 	var peers []string
-	for _, peer := range cfg.peers {
+	for _, peer := range configured {
 		if seen[peer] {
 			continue
 		}
 		seen[peer] = true
 		peers = append(peers, peer)
-	}
-	if cfg.discovered != nil {
-		for _, peer := range cfg.discovered.addresses(peerMaxAge) {
-			if seen[peer] {
-				continue
-			}
-			seen[peer] = true
-			peers = append(peers, peer)
-		}
 	}
 	return peers
 }
@@ -82,14 +81,20 @@ func effectivePeers(cfg *dnsConfig) []string {
 // menor).
 func mergeAdvertised(cfg *dnsConfig, updated map[string]discoveredRoute, peer string, advertised []advertisedRoute) {
 	for _, adv := range advertised {
+		if adv.OwnerFingerprint != "" && adv.OwnerFingerprint == cfg.fingerprint {
+			continue // nunca aprender uma rota de volta para a propria identidade persistente
+		}
 		if adv.Owner == cfg.nodeName {
 			continue // nunca aprender uma rota de volta para si mesmo
+		}
+		if cfg.remoteMode == "manual" && adv.Distance > 0 {
+			continue // vizinhos remotos so entram quando adicionados manualmente pelo painel
 		}
 		newDistance := adv.Distance + 1
 		if newDistance > maxHops {
 			continue
 		}
-		if _, isOwn := updated[adv.Domain]; isOwn {
+		if _, ok := ownRoutes(cfg)[adv.Domain]; ok {
 			continue // dominio anunciado localmente sempre vence
 		}
 		existing, exists := updated[adv.Domain]
@@ -97,13 +102,14 @@ func mergeAdvertised(cfg *dnsConfig, updated map[string]discoveredRoute, peer st
 			continue
 		}
 		updated[adv.Domain] = discoveredRoute{
-			Domain:   adv.Domain,
-			Owner:    adv.Owner,
-			NextHop:  hostOf(peer),
-			Distance: newDistance,
-			Source:   peer,
-			State:    routeStateOK,
-			LastSeen: time.Now(),
+			Domain:           adv.Domain,
+			Owner:            adv.Owner,
+			OwnerFingerprint: adv.OwnerFingerprint,
+			NextHop:          hostOf(peer),
+			Distance:         newDistance,
+			Source:           peer,
+			State:            routeStateOK,
+			LastSeen:         time.Now(),
 		}
 	}
 }
@@ -111,12 +117,19 @@ func mergeAdvertised(cfg *dnsConfig, updated map[string]discoveredRoute, peer st
 // markStaleOrCarryOver preserva, no mapa "updated", qualquer rota
 // aprendida antes que nao foi reconfirmada neste ciclo - marcando como
 // "stale" (nunca apagando) se ja passou tempo demais sem confirmacao.
-func markStaleOrCarryOver(previous, updated map[string]discoveredRoute) {
+func markStaleOrCarryOver(previous, updated map[string]discoveredRoute, activePeers []string) {
+	activeSources := map[string]bool{}
+	for _, peer := range activePeers {
+		activeSources[peer] = true
+	}
 	for domain, old := range previous {
 		if _, present := updated[domain]; present {
 			continue
 		}
 		if old.Source == "self" {
+			continue
+		}
+		if !activeSources[old.Source] {
 			continue
 		}
 		if time.Since(old.LastSeen) > staleAfter {

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SelectNative } from "@/components/ui/select-native";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { api, ApiError } from "@/lib/api";
 
@@ -14,6 +15,7 @@ export function DiscoverMeshConfigCard() {
   const queryClient = useQueryClient();
   const [domains, setDomains] = useState("");
   const [nodeName, setNodeName] = useState("");
+  const [remoteRoutes, setRemoteRoutes] = useState("auto");
 
   const config = useQuery<Record<string, string>>({
     queryKey: ["dns", "config"],
@@ -24,11 +26,17 @@ export function DiscoverMeshConfigCard() {
     if (config.data) {
       setDomains(config.data.DOMAINS ?? "");
       setNodeName(config.data.DISCOVER_NODE_NAME ?? "");
+      setRemoteRoutes(config.data.DISCOVER_REMOTE_ROUTES === "manual" ? "manual" : "auto");
     }
   }, [config.data]);
 
   const save = useMutation({
-    mutationFn: () => api.patch("/dns/config", { DOMAINS: domains, DISCOVER_NODE_NAME: nodeName }),
+    mutationFn: () =>
+      api.patch("/dns/config", {
+        DOMAINS: domains,
+        DISCOVER_NODE_NAME: nodeName,
+        DISCOVER_REMOTE_ROUTES: remoteRoutes,
+      }),
     onSuccess: () => {
       toast.success("Malha de descoberta salva. Clique em 'Aplicar' para reiniciar o DNS com os novos valores.");
       queryClient.invalidateQueries({ queryKey: ["dns", "config"] });
@@ -53,7 +61,7 @@ export function DiscoverMeshConfigCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-2">
             <Label htmlFor="domains">DOMAINS (zonas da malha)</Label>
             <Input id="domains" placeholder="ex.: dev" value={domains} onChange={(e) => setDomains(e.target.value)} />
@@ -66,6 +74,13 @@ export function DiscoverMeshConfigCard() {
               value={nodeName}
               onChange={(e) => setNodeName(e.target.value)}
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="remoteRoutes">Vizinhos remotos</Label>
+            <SelectNative id="remoteRoutes" value={remoteRoutes} onChange={(e) => setRemoteRoutes(e.target.value)}>
+              <option value="auto">Pegar automaticamente</option>
+              <option value="manual">Adicionar à mão</option>
+            </SelectNative>
           </div>
         </div>
         <div className="flex gap-2">

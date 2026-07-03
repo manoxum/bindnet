@@ -48,8 +48,25 @@ func main() {
 		log.Printf("[dns-provider] server_name do nginx-ui descobertos: hosts=%v zonas=%v", zoneNames(nginxNames.hosts), zoneNames(nginxNames.zones))
 	}
 
-	dockerGateway := os.Getenv("DOCKER_HOST_GATEWAY")
 	hotspotGateway := getenv("HOTSPOT_GATEWAY", "192.168.12.1")
+	hostSourceIPs, err := discoverHostSourceIPs(os.Getenv("HOST_SOURCE_CIDR"), "127.0.0.1", hotspotGateway)
+	if err != nil {
+		log.Fatalf("[dns-provider] erro ao interpretar HOST_SOURCE_CIDR: %v", err)
+	}
+	if len(hostSourceIPs) > 0 {
+		log.Printf("[dns-provider] IPs LAN/peer detectados via HOST_SOURCE_CIDR: %v", hostSourceIPs)
+	}
+
+	dockerExcludes := append([]string{hotspotGateway}, hostSourceIPs...)
+	dockerGateways, err := discoverDockerGateways(dockerExcludes...)
+	if err != nil {
+		log.Fatalf("[dns-provider] erro ao descobrir gateways Docker locais: %v", err)
+	}
+	if len(dockerGateways) == 0 {
+		log.Printf("[dns-provider] aviso: nenhum gateway Docker local detectado; a view container nao sera aberta")
+	} else {
+		log.Printf("[dns-provider] gateways Docker detectados para a view container: %v", dockerGateways)
+	}
 
 	timeout := 90 * time.Second
 	if raw := os.Getenv("COREDNS_WAIT_TIMEOUT"); raw != "" {
@@ -57,7 +74,8 @@ func main() {
 			timeout = seconds
 		}
 	}
-	requiredIPs := []string{"127.0.0.1", dockerGateway}
+	requiredIPs := append([]string{"127.0.0.1"}, dockerGateways...)
+	requiredIPs = append(requiredIPs, hostSourceIPs...)
 	log.Printf("[dns-provider] aguardando IPs locais necessarios: %v", requiredIPs)
 	if err := waitForIPs(requiredIPs, timeout); err != nil {
 		log.Fatalf("[dns-provider] %v", err)
@@ -83,7 +101,13 @@ func main() {
 	hydrateCancel()
 
 	nodeName := getenv("DISCOVER_NODE_NAME", hostname())
-	peers := parsePeers(os.Getenv("DISCOVER_PEERS"))
+	identityCtx, identityCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	fingerprint, err := ensureNodeFingerprint(identityCtx, db)
+	identityCancel()
+	if err != nil {
+		log.Fatalf("[dns-provider] erro ao garantir fingerprint local: %v", err)
+	}
+	remoteMode := normalizeRemoteRouteMode(getenv("DISCOVER_REMOTE_ROUTES", "auto"))
 	discoverPort := getenv("DISCOVER_PORT", "8531")
 
 	routes := newRouteTable()
@@ -96,37 +120,33 @@ func main() {
 	routesCancel()
 
 	cfg := &dnsConfig{
-		tlds:           tlds,
-		domainZones:    domainZones,
-		nginxHosts:     nginxNames.hosts,
-		nginxZones:     nginxNames.zones,
-		dockerGateway:  dockerGateway,
-		hotspotGateway: hotspotGateway,
-		db:             db,
-		cache:          cache,
-		routes:         routes,
-		nodeName:       nodeName,
-		peers:          peers,
-		discovered:     newPeerRegistry(),
+		tlds:        tlds,
+		domainZones: domainZones,
+		nginxHosts:  nginxNames.hosts,
+		nginxZones:  nginxNames.zones,
+		db:          db,
+		cache:       cache,
+		routes:      routes,
+		nodeName:    nodeName,
+		fingerprint: fingerprint,
+		remoteMode:  remoteMode,
 	}
-	log.Printf("[dns-provider] no de descoberta '%s', peers configurados: %v", nodeName, peers)
+	log.Printf("[dns-provider] no de descoberta '%s' fingerprint=%s, rotas remotas: %s", nodeName, fingerprint, remoteMode)
 
 	go startDiscoverServer(cfg, discoverPort)
 	go pollPeers(cfg)
-	if len(domainZones) > 0 {
-		// Anuncio/escuta multicast so fazem sentido com o discover mode
-		// ligado (DOMAINS nao vazio) - mesma condicao que já liga o resto
-		// da malha.
-		go announcePeer(cfg, discoverPort)
-		go listenForPeers(cfg, discoverPort)
-	}
 
-	errCh := make(chan error, 2)
-	go func() { errCh <- serve("127.0.0.1:53", newHandler(cfg, viewHost)) }()
-	if dockerGateway != "" {
-		go func() { errCh <- serve(dockerGateway+":53", newHandler(cfg, viewContainer)) }()
+	errCh := make(chan error, 1+len(dockerGateways)+len(hostSourceIPs))
+	go func() { errCh <- serve("127.0.0.1:53", newHandler(cfg, viewHost, "")) }()
+	for _, gateway := range dockerGateways {
+		gateway := gateway
+		go func() { errCh <- serve(gateway+":53", newHandler(cfg, viewContainer, gateway)) }()
 	}
-	go serveHotspotWhenAvailable(hotspotGateway, timeout, newHandler(cfg, viewHotspot))
+	for _, hostIP := range hostSourceIPs {
+		hostIP := hostIP
+		go func() { errCh <- serve(hostIP+":53", newHandler(cfg, viewContainer, hostIP)) }()
+	}
+	go serveHotspotWhenAvailable(hotspotGateway, timeout, newHandler(cfg, viewHotspot, hotspotGateway))
 
 	log.Fatalf("[dns-provider] erro no servidor: %v", <-errCh)
 }

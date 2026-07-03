@@ -39,6 +39,11 @@ export function BindnetRoutesTab({ routes, forgetPending, onForget }: BindnetRou
             <span className="truncate">dono: {route.owner}</span>
             <span>{route.distance} salto{route.distance === 1 ? "" : "s"}</span>
           </div>
+          <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+            <span className="truncate">next hop: {route.nextHop || "sem next hop"}</span>
+            <span className="truncate">source: {route.source}</span>
+            <span className="truncate">fingerprint: {route.ownerFingerprint || "não informado"}</span>
+          </div>
         </div>
       ))}
     </div>

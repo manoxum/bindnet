@@ -17,7 +17,7 @@ func TestZoneForExactDomainZoneIsLocal(t *testing.T) {
 	}
 }
 
-func TestZoneForUnknownNameInsideDomainZoneStaysUnknown(t *testing.T) {
+func TestZoneForSubdomainInsideConcreteDomainZoneIsLocal(t *testing.T) {
 	cfg := &dnsConfig{
 		tlds:        map[string]bool{"local": true},
 		domainZones: map[string]bool{"costa.bnet": true},
@@ -27,7 +27,64 @@ func TestZoneForUnknownNameInsideDomainZoneStaysUnknown(t *testing.T) {
 	}
 
 	zone, kind, nextHop := zoneFor("app.costa.bnet.", cfg)
-	if zone != "costa.bnet." || kind != zoneMeshUnknown || nextHop != "" {
-		t.Fatalf("zoneFor(app.costa.bnet.) = (%q, %v, %q), want unknown costa.bnet.", zone, kind, nextHop)
+	if zone != "costa.bnet." || kind != zoneLocal || nextHop != "" {
+		t.Fatalf("zoneFor(app.costa.bnet.) = (%q, %v, %q), want local costa.bnet.", zone, kind, nextHop)
+	}
+}
+
+func TestZoneForUnknownNameInsideBroadMeshZoneStaysUnknown(t *testing.T) {
+	cfg := &dnsConfig{
+		tlds:        map[string]bool{"local": true},
+		domainZones: map[string]bool{"bnet": true},
+		nginxHosts:  map[string]bool{},
+		nginxZones:  map[string]bool{},
+		routes:      newRouteTable(),
+	}
+
+	zone, kind, nextHop := zoneFor("app.unknown.bnet.", cfg)
+	if zone != "bnet." || kind != zoneMeshUnknown || nextHop != "" {
+		t.Fatalf("zoneFor(app.unknown.bnet.) = (%q, %v, %q), want unknown bnet.", zone, kind, nextHop)
+	}
+}
+
+func TestZoneForRemoteRouteMatchesSubdomains(t *testing.T) {
+	routes := newRouteTable()
+	routes.replace(map[string]discoveredRoute{
+		"ahmed.bnet": {
+			Domain:  "ahmed.bnet",
+			Owner:   "Ahmed",
+			NextHop: "10.234.2.140",
+			Source:  "10.234.2.140:8531",
+			State:   routeStateOK,
+		},
+	})
+	cfg := &dnsConfig{
+		tlds:        map[string]bool{"local": true},
+		domainZones: map[string]bool{"costa.bnet": true},
+		nginxHosts:  map[string]bool{},
+		nginxZones:  map[string]bool{},
+		routes:      routes,
+	}
+
+	zone, kind, nextHop := zoneFor("test.ahmed.bnet.", cfg)
+	if zone != "ahmed.bnet." || kind != zoneRemote || nextHop != "10.234.2.140" {
+		t.Fatalf("zoneFor(test.ahmed.bnet.) = (%q, %v, %q), want remote ahmed.bnet via 10.234.2.140", zone, kind, nextHop)
+	}
+}
+
+func TestOwnRoutesAdvertisesConcreteDomainZones(t *testing.T) {
+	cfg := &dnsConfig{
+		domainZones: map[string]bool{"costa.bnet": true, "bnet": true},
+		nginxHosts:  map[string]bool{},
+		nginxZones:  map[string]bool{},
+		nodeName:    "Daniel Costa",
+	}
+
+	owned := ownRoutes(cfg)
+	if _, ok := owned["costa.bnet"]; !ok {
+		t.Fatalf("ownRoutes did not advertise concrete domain zone costa.bnet")
+	}
+	if _, ok := owned["bnet"]; ok {
+		t.Fatalf("ownRoutes advertised broad mesh root bnet")
 	}
 }

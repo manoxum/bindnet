@@ -5,13 +5,16 @@ import { api } from "@/lib/api";
 export interface DiscoveredPeer {
   address: string;
   nodeName: string;
+  fingerprint?: string;
   source: string;
   lastSeenAt: string;
+  domains?: string[];
 }
 
 export interface DiscoverRoute {
   domain: string;
   owner: string;
+  ownerFingerprint?: string;
   nextHop: string;
   distance: number;
   source: string;
@@ -27,12 +30,23 @@ export interface DiscoveredServer {
   file?: string;
 }
 
+export interface LocalBindnetNode {
+  nodeName: string;
+  fingerprint?: string;
+  domains: string[];
+  port: string;
+}
+
 export type BindnetNodeKind = "local" | "direct" | "inferred";
 
 export interface BindnetNode {
   id: string;
   name: string;
   address: string;
+  host?: string;
+  port?: string;
+  fingerprint?: string;
+  domains?: string[];
   kind: BindnetNodeKind;
   source: string;
   lastSeenAt?: string;
@@ -40,6 +54,7 @@ export interface BindnetNode {
 
 export interface MeshData {
   config: Record<string, string>;
+  localNode: LocalBindnetNode;
   peers: DiscoveredPeer[];
   routes: DiscoverRoute[];
   localServices: DiscoveredServer[];
@@ -63,63 +78,127 @@ export function normalizePeerAddress(value: string) {
 
 export async function unlinkPeerAddress(config: Record<string, string> | undefined, address: string) {
   const target = normalizePeerAddress(address);
-  const peers = splitPeers(config?.DISCOVER_PEERS);
+  const peers = splitPeers(config?.DISCOVER_CONFIGURED_PEERS);
   const remaining = peers.filter((peer) => normalizePeerAddress(peer) !== target);
 
   if (!target || remaining.length === peers.length) {
     throw new Error("Este Bindnet não está vinculado manualmente.");
   }
 
-  await api.patch("/dns/config", { DISCOVER_PEERS: joinPeers(remaining) });
+  await api.patch("/dns/config", { DISCOVER_CONFIGURED_PEERS: joinPeers(remaining) });
   await api.post("/dns/apply");
+}
+
+export function remoteRouteMode(config?: Record<string, string>) {
+  return config?.DISCOVER_REMOTE_ROUTES === "manual" ? "manual" : "auto";
 }
 
 export function peerHost(address: string) {
   return address.includes(":") ? address.split(":")[0] : address;
 }
 
+export function peerPort(address: string) {
+  const parts = address.split(":");
+  return parts.length > 1 ? parts[parts.length - 1] : "";
+}
+
 export function nodePath(id: string) {
   return `/bindnets/${encodeURIComponent(id)}`;
 }
 
-export function buildNodes(config: Record<string, string>, routes: DiscoverRoute[]): BindnetNode[] {
-  const localName = config.DISCOVER_NODE_NAME?.trim() || "este-servidor";
+function unique(values: Array<string | undefined>) {
+  return [...new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])];
+}
+
+function isLocalRoute(route: DiscoverRoute, localName: string, localFingerprint?: string) {
+  if (localFingerprint && route.ownerFingerprint === localFingerprint) return true;
+  return route.owner === localName || route.source === "self";
+}
+
+export function buildNodes(
+  config: Record<string, string>,
+  peers: DiscoveredPeer[],
+  routes: DiscoverRoute[],
+  localServices: DiscoveredServer[],
+  localNode: LocalBindnetNode,
+): BindnetNode[] {
+  const localName = localNode.nodeName?.trim() || config.DISCOVER_NODE_NAME?.trim() || "este-servidor";
   const nodes = new Map<string, BindnetNode>();
+  const peerByAddress = new Map(peers.map((peer) => [normalizePeerAddress(peer.address), peer]));
+  const directByHost = new Map<string, BindnetNode>();
 
   nodes.set("local", {
     id: "local",
     name: localName,
-    address: "local",
+    address: `127.0.0.1:${localNode.port || config.DISCOVER_PORT || "8531"}`,
+    host: "127.0.0.1",
+    port: localNode.port || config.DISCOVER_PORT || "8531",
+    fingerprint: localNode.fingerprint,
+    domains: unique([...(localNode.domains ?? []), ...localServices.map((service) => service.name)]),
     kind: "local",
     source: "self",
   });
 
-  for (const address of splitPeers(config.DISCOVER_PEERS)) {
-    nodes.set(`peer:${address}`, {
+  for (const address of splitPeers(config.DISCOVER_CONFIGURED_PEERS)) {
+    const normalized = normalizePeerAddress(address);
+    const meta = peerByAddress.get(normalized);
+    const node: BindnetNode = {
       id: `peer:${address}`,
-      name: address,
+      name: meta?.nodeName || address,
       address,
+      host: peerHost(address),
+      port: peerPort(address),
+      fingerprint: meta?.fingerprint,
+      domains: meta?.domains,
       kind: "direct",
       source: "manual",
-    });
+      lastSeenAt: meta?.lastSeenAt,
+    };
+    nodes.set(node.id, node);
+    directByHost.set(peerHost(address), node);
   }
 
   for (const route of routes) {
-    if (!route.owner || route.owner === localName) continue;
-    const sourceMatch = [...nodes.values()].find(
-      (node) => node.kind === "direct" && peerHost(node.address) === peerHost(route.source),
-    );
-    if (sourceMatch && sourceMatch.name === route.owner) continue;
-    const id = `owner:${route.owner}`;
+    if (isLocalRoute(route, localName, localNode.fingerprint)) continue;
+    const direct = directByHost.get(peerHost(route.source));
+    if (!direct || route.distance !== 1) continue;
+    if (direct.name === direct.address && route.owner) {
+      direct.name = route.owner;
+    }
+    if (!direct.fingerprint && route.ownerFingerprint) {
+      direct.fingerprint = route.ownerFingerprint;
+    }
+    direct.domains = unique([...(direct.domains ?? []), route.domain]);
+    direct.lastSeenAt = direct.lastSeenAt || route.lastSeenAt;
+  }
+
+  const directFingerprints = new Set(
+    [...directByHost.values()].map((node) => node.fingerprint).filter(Boolean) as string[],
+  );
+  const directNames = new Set([...directByHost.values()].map((node) => node.name).filter(Boolean));
+
+  for (const route of routes) {
+    if (!route.owner || isLocalRoute(route, localName, localNode.fingerprint)) continue;
+    if (route.ownerFingerprint && directFingerprints.has(route.ownerFingerprint)) continue;
+    if (directNames.has(route.owner)) continue;
+    const id = route.ownerFingerprint ? `owner:${route.ownerFingerprint}` : `owner:${route.owner}`;
     if (!nodes.has(id)) {
       nodes.set(id, {
         id,
         name: route.owner,
         address: route.nextHop ? `via ${route.nextHop}` : "rota aprendida",
+        host: route.nextHop || peerHost(route.source),
+        fingerprint: route.ownerFingerprint,
+        domains: [route.domain],
         kind: "inferred",
         source: route.distance <= 1 ? "rota direta" : "rota indireta",
         lastSeenAt: route.lastSeenAt,
       });
+    } else {
+      const node = nodes.get(id);
+      if (node) {
+        node.domains = unique([...(node.domains ?? []), route.domain]);
+      }
     }
   }
 
@@ -133,13 +212,14 @@ export function useMeshData() {
   return useQuery<MeshData>({
     queryKey: ["bindnets", "mesh"],
     queryFn: async () => {
-      const [config, peers, routes, localServices] = await Promise.all([
+      const [config, peers, routes, localServices, localNode] = await Promise.all([
         api.get<Record<string, string>>("/dns/config"),
         api.get<DiscoveredPeer[]>("/dns/peers"),
         api.get<DiscoverRoute[]>("/dns/routes"),
         api.get<DiscoveredServer[]>("/dns/discovered-servers"),
+        api.get<LocalBindnetNode>("/dns/node"),
       ]);
-      return { config, peers, routes, localServices, nodes: buildNodes(config, routes) };
+      return { config, localNode, peers, routes, localServices, nodes: buildNodes(config, peers, routes, localServices, localNode) };
     },
     refetchInterval: 10000,
   });
@@ -175,7 +255,8 @@ export function serviceRowsForNode(node: BindnetNode, data: MeshData) {
   }
 
   const routes = data.routes.filter((route) => {
-    if (route.owner === node.name) return true;
+    if (node.fingerprint && route.ownerFingerprint === node.fingerprint) return true;
+    if (!node.fingerprint && route.owner === node.name) return true;
     return node.kind === "direct" && peerHost(route.source) === peerHost(node.address) && route.distance === 1;
   });
 
@@ -189,7 +270,11 @@ export function serviceRowsForNode(node: BindnetNode, data: MeshData) {
 
 export function routesViaNode(node: BindnetNode, routes: DiscoverRoute[]) {
   if (node.kind !== "direct") return [];
-  return routes.filter((route) => peerHost(route.source) === peerHost(node.address) && route.owner !== node.name);
+  return routes.filter((route) => {
+    if (peerHost(route.source) !== peerHost(node.address)) return false;
+    if (node.fingerprint && route.ownerFingerprint === node.fingerprint) return false;
+    return route.owner !== node.name;
+  });
 }
 
 export function neighborRows(node: BindnetNode, data: MeshData) {

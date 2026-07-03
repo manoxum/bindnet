@@ -14,9 +14,10 @@ import (
 // view identifica por qual IP de bind a consulta chegou - como cada view
 // e um socket UDP separado (ver main.go:serve), o bind em si ja diz de
 // onde a consulta veio, sem precisar inspecionar o IP remoto do cliente:
-// containers so alcancam o host via DOCKER_HOST_GATEWAY, clientes do
-// hotspot so alcancam via HOTSPOT_GATEWAY, e o proprio host consulta via
-// 127.0.0.1 (resolv.conf/systemd-resolved apontam pra ai).
+// containers so alcancam o host pelos gateways Docker detectados no host,
+// peers na LAN chegam pelo IP de HOST_SOURCE_CIDR, clientes do hotspot so
+// alcancam via HOTSPOT_GATEWAY, e o proprio host consulta via 127.0.0.1
+// (resolv.conf/systemd-resolved apontam pra ai).
 type view int
 
 const (
@@ -28,25 +29,23 @@ const (
 var upstreamServers = []string{"8.8.8.8:53", "1.1.1.1:53"}
 
 type dnsConfig struct {
-	tlds           map[string]bool
-	domainZones    map[string]bool
-	nginxHosts     map[string]bool
-	nginxZones     map[string]bool
-	dockerGateway  string
-	hotspotGateway string
-	db             *sql.DB
-	cache          *redis.Client
-	routes         *routeTable
-	nodeName       string
-	peers          []string
-	discovered     *peerRegistry
+	tlds        map[string]bool
+	domainZones map[string]bool
+	nginxHosts  map[string]bool
+	nginxZones  map[string]bool
+	db          *sql.DB
+	cache       *redis.Client
+	routes      *routeTable
+	nodeName    string
+	fingerprint string
+	remoteMode  string
 }
 
 // newHandler devolve o handler dns.HandlerFunc para uma view especifica -
 // cada listener (ver main.go) usa sua propria instancia, entao o handler
 // ja sabe, por closure, qual resposta fixa dar para containers/hotspot e
 // so precisa de logica extra (Postgres+Redis) para a view do host.
-func newHandler(cfg *dnsConfig, v view) dns.HandlerFunc {
+func newHandler(cfg *dnsConfig, v view, responseIP string) dns.HandlerFunc {
 	return func(w dns.ResponseWriter, r *dns.Msg) {
 		if len(r.Question) != 1 {
 			forwardVia(w, r, upstreamServers)
@@ -77,7 +76,7 @@ func newHandler(cfg *dnsConfig, v view) dns.HandlerFunc {
 
 		switch question.Qtype {
 		case dns.TypeA:
-			ip, err := answerIPFor(cfg, v, kind, name)
+			ip, err := answerIPFor(cfg, v, kind, name, responseIP)
 			if err != nil {
 				log.Printf("[dns-provider] erro ao resolver %s: %v", name, err)
 				msg.Rcode = dns.RcodeServerFailure

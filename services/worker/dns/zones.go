@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -35,17 +36,20 @@ func zoneFor(fqdn string, cfg *dnsConfig) (zone string, kind zoneKind, nextHop s
 		return zone + ".", zoneLocal, ""
 	}
 	if zone, ok := suffixZoneFor(labels, cfg.domainZones); ok {
-		if zone == name {
+		if zone == name || isConcreteOwnedDomainZone(zone) {
 			return zone + ".", zoneLocal, ""
 		}
-		if route, ok := cfg.routes.lookup(zone); ok {
-			if route.Source == "self" {
-				return zone + ".", zoneLocal, ""
-			}
-			if route.NextHop != "" {
-				return zone + ".", zoneRemote, route.NextHop
-			}
+	}
+	if zone, route, ok := cfg.routes.lookupSuffix(labels); ok {
+		if route.Source == "self" {
+			return zone + ".", zoneLocal, ""
 		}
+		if route.NextHop != "" {
+			return zone + ".", zoneRemote, route.NextHop
+		}
+		return zone + ".", zoneMeshUnknown, ""
+	}
+	if zone, ok := suffixZoneFor(labels, cfg.domainZones); ok {
 		return zone + ".", zoneMeshUnknown, ""
 	}
 
@@ -67,15 +71,27 @@ func suffixZoneFor(labels []string, domains map[string]bool) (string, bool) {
 	return "", false
 }
 
+func isConcreteOwnedDomainZone(zone string) bool {
+	return strings.Contains(zone, ".")
+}
+
 // answerIPFor resolve o IP de resposta conforme a view: container/hotspot
-// sao sempre o gateway daquela view; host usa loopback persistente por
-// hostname.
-func answerIPFor(cfg *dnsConfig, v view, kind zoneKind, name string) (net.IP, error) {
+// respondem com o IP do socket que recebeu a consulta; host usa loopback
+// persistente por hostname.
+func answerIPFor(cfg *dnsConfig, v view, kind zoneKind, name string, responseIP string) (net.IP, error) {
 	switch v {
 	case viewContainer:
-		return net.ParseIP(cfg.dockerGateway), nil
+		ip := net.ParseIP(responseIP)
+		if ip == nil {
+			return nil, fmt.Errorf("gateway Docker invalido para resposta: %q", responseIP)
+		}
+		return ip, nil
 	case viewHotspot:
-		return net.ParseIP(cfg.hotspotGateway), nil
+		ip := net.ParseIP(responseIP)
+		if ip == nil {
+			return nil, fmt.Errorf("gateway do hotspot invalido para resposta: %q", responseIP)
+		}
+		return ip, nil
 	default:
 		return loopbackIPFor(cfg, name)
 	}

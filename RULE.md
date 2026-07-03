@@ -260,11 +260,14 @@ Regras:
   `local,test,example`). Cada TLD é validado (`[a-z0-9-]`, sem começar
   ou terminar com `-`); TLD inválido é erro fatal. Duplicatas são
   ignoradas silenciosamente.
-- `DOMAINS` define as zonas que participam do **discover mode** (ex.:
-  `discover`, `costa.dev`, `*.costa.dev`). Essas zonas não significam
-  "sempre responder com o IP desta máquina": elas delimitam quais
-  nomes podem ser resolvidos/roteados pela malha de servidores
-  Bindnet. `DOMAINS` vazio desliga o discover mode.
+- `DOMAINS` define as zonas que participam do **discover mode**. Valores
+  com um label (ex.: `bnet`, `dev`, `discover`) são raízes amplas da
+  malha: nomes dentro delas só resolvem se forem locais via
+  `server_name`/rota própria ou aprendidos de outro Bindnet. Valores
+  com mais de um label (ex.: `costa.bnet`, `*.costa.bnet`) são zonas
+  concretas deste nó: a zona inteira é anunciada como local e
+  subdomínios como `app.costa.bnet` resolvem localmente. `DOMAINS`
+  vazio desliga o discover mode.
 - `server_name` declarados no nginx-ui são tratados como anúncios de
   serviços locais deste nó. O `dns-provider` descobre esses nomes a
   partir do volume `nginx_config` montado somente leitura. Nomes exatos
@@ -272,18 +275,19 @@ Regras:
   `*.costa.dev`) anunciam uma zona inteira. Entradas `_`, regex e
   variáveis do Nginx são ignoradas.
 - Quando a consulta é para um nome de `DOMAINS` que este nó possui
-  localmente (por `server_name` ou por outra fonte local equivalente),
+  localmente (por zona concreta em `DOMAINS`, por `server_name` ou por
+  outra fonte local equivalente),
   a resposta segue a mesma resolução local split-horizon dos TLDs de
   `DNS_LOCAL_TLDS`: host recebe loopback persistente, containers
-  recebem `DOCKER_HOST_GATEWAY` e clientes do hotspot recebem
-  `HOTSPOT_GATEWAY`.
+  recebem o gateway Docker em que a consulta chegou e clientes do
+  hotspot recebem `HOTSPOT_GATEWAY`.
 - Quando a consulta é para um nome de `DOMAINS` pertencente a outro
   servidor descoberto, o Bindnet funciona como um **roteador de
   descoberta**: o nó local responde encaminhando (proxy real da
   consulta, não uma resposta fixa) para o próximo salto conhecido, não
   necessariamente para o servidor final. Exemplo: se a topologia é
-  `A <-> B <-> C <-> D`, com `a.dev`, `b.dev`, `c.dev`, `d.dev`
-  (`DOMAINS=dev` em todos os quatro), então:
+  `A <-> B <-> C <-> D`, com `DOMAINS=a.dev`, `DOMAINS=b.dev`,
+  `DOMAINS=c.dev` e `DOMAINS=d.dev`, então:
   - no servidor A, uma consulta para `b.dev` é encaminhada para B,
     porque B é o dono direto desse domínio;
   - no servidor A, consultas para `c.dev` ou `d.dev` também são
@@ -291,34 +295,33 @@ Regras:
     alcançar C ou D;
   - no servidor B, `c.dev` segue para C e `d.dev` também segue para C,
     que então entrega a D.
-- **Como os nós se conhecem**: dois mecanismos complementares.
-  - **Auto-descoberta na mesma rede local**
-    (`discover_broadcast.go`): com o discover mode ligado (`DOMAINS`
-    não vazio), cada nó publica a cada 10s um anúncio (seu
-    `DISCOVER_NODE_NAME` e `DISCOVER_PORT`) num grupo multicast
-    (`239.255.42.99`, escopo organizacional — não atravessa
-    roteadores) e escuta o mesmo grupo para achar outros. Qualquer nó
-    visto há menos de ~30s entra automaticamente na lista de peers
-    consultados por `pollPeers`, sem ação do operador; a lista completa
-    fica persistida em `discover_peers` só para o painel mostrar (`GET
-    /api/dns/peers`, card "Servidores Bindnet na rede").
-  - **Configuração manual** (`DISCOVER_PEERS`): necessária para
-    vizinhos fora da rede local, já que multicast não atravessa
-    roteadores — endereços `host:porta` do `DISCOVER_PORT` de cada
-    vizinho.
-  - Nos dois casos, a troca de fato acontece do mesmo jeito: o
-    `dns-provider` sobe um endpoint HTTP próprio
-    (`GET /discover/routes`, porta `DISCOVER_PORT`, padrão `8531`) e
-    uma goroutine que consulta cada peer (manual + auto-descoberto) a
-    cada 15 segundos, implementando um vetor de distância simples
-    (estilo RIP):
-  - cada nó anuncia, com distância 0, os nomes que ele mesmo possui
-    localmente (`server_name` do nginx-ui) que também caem dentro de
-    algum `DOMAINS` seu (chamado de "dono": `DISCOVER_NODE_NAME`,
-    padrão o hostname do container);
+- **Como os nós se conhecem**: não existe mais entrada automática por
+  multicast/broadcast. O operador precisa clicar em "Fazer busca" no
+  painel para varrer a LAN naquele momento, selecionar o peer
+  encontrado e salvar. A busca manual grava apenas candidatos em
+  `discover_peers`; a malha efetiva continua sendo exclusivamente os
+  peers diretos salvos no Postgres (`discover_configured_peers`).
+- Para peers fora da LAN, o operador adiciona manualmente endereços
+  `host:porta` do `DISCOVER_PORT`.
+- A troca de rotas acontece só com os peers efetivamente presentes em
+  `discover_configured_peers`: o `dns-provider` sobe endpoints HTTP
+  próprios (`GET /discover/info` e `GET /discover/routes`, porta
+  `DISCOVER_PORT`, padrão `8531`) e uma goroutine que consulta cada peer
+  a cada 15 segundos, implementando um vetor de distância simples
+  (estilo RIP):
+  - cada nó anuncia, com distância 0, suas zonas concretas de
+    `DOMAINS` e os nomes que ele mesmo possui localmente
+    (`server_name` do nginx-ui) que também caem dentro de algum
+    `DOMAINS` seu (chamado de "dono": `DISCOVER_NODE_NAME`, padrão o
+    hostname do container);
   - ao aprender uma rota de um peer, a distância local é
     `distância_anunciada + 1`; rotas com distância acima de 16 saltos
     são descartadas (limite de segurança contra contagem-ao-infinito);
+  - `DISCOVER_REMOTE_ROUTES=auto` permite aprender vizinhos remotos
+    anunciados por um peer direto; `DISCOVER_REMOTE_ROUTES=manual`
+    aceita apenas rotas próprias do peer direto (`distância anunciada =
+    0`), exigindo que vizinhos remotos sejam adicionados explicitamente
+    pelo painel;
   - o endpoint de descoberta nunca devolve a um peer uma rota que só
     existe porque foi aprendida dele mesmo (split-horizon, baseado no
     IP de origem da requisição HTTP) e um nó nunca aprende de volta uma
@@ -359,10 +362,15 @@ Regras:
     inicialização do serviço** (não espera cada hostname ser
     consultado de novo para voltar a estar em cache); cache miss vai
     ao Postgres, aloca se necessário, e grava de volta no Redis.
-  - `DOCKER_HOST_GATEWAY` (**view container**): consultas vindas de
-    containers Docker (que só alcançam o host via esse gateway).
-    Registros `A` para os TLDs locais sempre respondem com o próprio
-    `DOCKER_HOST_GATEWAY`.
+  - gateways Docker detectados automaticamente (**view container**):
+    consultas vindas de containers Docker (que só alcançam o host por
+    esses gateways). Registros `A` para os TLDs locais sempre respondem
+    com o próprio gateway Docker em que a consulta chegou.
+  - IPs declarados em `HOST_SOURCE_CIDR` (**view peer/LAN**):
+    consultas encaminhadas por outros servidores Bindnet chegam pelo IP
+    físico/LAN deste nó. Registros `A` para zonas locais respondem com
+    esse próprio IP, para que o cliente remoto consiga alcançar o dono
+    final do domínio.
   - `HOTSPOT_GATEWAY` (**view hotspot**): consultas vindas de clientes
     conectados ao hotspot Wi-Fi. Registros `A` para os TLDs locais
     sempre respondem com o próprio `HOTSPOT_GATEWAY`.
@@ -374,12 +382,13 @@ Regras:
     quebrada, mesmo a resposta `A` estando correta.
 - Para qualquer outro domínio (em qualquer view), a consulta é
   encaminhada para DNS público (`8.8.8.8`, `1.1.1.1`).
-- Antes de abrir os sockets principais, o processo **espera** (até
-  `COREDNS_WAIT_TIMEOUT`, padrão 90s) `127.0.0.1` e
-  `DOCKER_HOST_GATEWAY` existirem na máquina. O socket de
-  `HOTSPOT_GATEWAY` é tratado em loop separado: se o hotspot ainda não
-  criou o IP, o dns-provider continua vivo e tenta abrir esse listener
-  novamente a cada poucos segundos.
+- Antes de abrir os sockets principais, o processo **detecta** os
+  gateways das bridges Docker existentes no host, lê `HOST_SOURCE_CIDR`
+  e **espera** (até `COREDNS_WAIT_TIMEOUT`, padrão 90s) esses IPs e
+  `127.0.0.1` existirem na máquina. O socket de `HOTSPOT_GATEWAY` é
+  tratado em loop separado:
+  se o hotspot ainda não criou o IP, o dns-provider continua vivo e
+  tenta abrir esse listener novamente a cada poucos segundos.
 - `dns-provider` roda com `network_mode: host` (precisa bindar IPs
   reais do host) e por isso **não enxerga a DNS interna do Docker**
   para resolver `postgres`/`redis` pelo nome do serviço — fala com
@@ -387,10 +396,10 @@ Regras:
   (`POSTGRES_HOST`/`REDIS_HOST` apontam para esses IPs fixos no
   `docker-compose.services.yml`, não para os nomes dos serviços).
 - Para que **qualquer container de qualquer projeto** resolva os TLDs
-  locais pela view container, o Docker daemon do host deve usar
-  `DOCKER_HOST_GATEWAY` como DNS upstream. O caminho versionado é
-  `sudo scripts/configure-docker-dns.sh`, que grava `"dns":
-  ["10.91.0.1"]` (ou o valor de `DOCKER_HOST_GATEWAY`) em
+  locais pela view container, o Docker daemon do host deve usar o
+  gateway Docker do Bindnet como DNS upstream. O caminho versionado é
+  `sudo scripts/configure-docker-dns.sh`, que detecta esse gateway via
+  `docker network inspect` e grava `"dns": ["<gateway>"]` em
   `/etc/docker/daemon.json`; aplicar de fato exige restart explícito do
   Docker pelo operador.
 
@@ -546,13 +555,15 @@ Regras:
 - Editar `.env` a partir do painel (`GET/PATCH /env` no worker) é
   restrito por "seção": a seção `hotspot` só pode tocar
   `WIFI_*`/`HOTSPOT_GATEWAY`/`HOTSPOT_CIDR`; a seção `dns` só pode
-  tocar `DNS_LOCAL_TLDS`, `DOMAINS`, `DISCOVER_PEERS`,
+  tocar `DNS_LOCAL_TLDS`, `DOMAINS`, `DISCOVER_REMOTE_ROUTES`,
   `DISCOVER_NODE_NAME` e `DISCOVER_PORT`. O editor preserva comentários,
   ordem e chaves não mencionadas — nunca regenera o arquivo do zero.
 - "Salvar" configuração (grava no `.env`) e "aplicar" (recria o
   container via `docker compose up -d --no-build`) são ações
   separadas — o painel nunca reinicia o hotspot/DNS sozinho ao salvar,
-  só quando o usuário confirma explicitamente "aplicar".
+  só quando o usuário confirma explicitamente "aplicar". Exceção:
+  peers diretos da malha Bindnet são estado operacional e ficam no
+  Postgres (`discover_configured_peers`), não no `.env`.
 - **`backend`** nunca monta `docker.sock` nem roda em
   `network_mode: host`; toda operação privilegiada (controlar
   containers, NetworkManager, listar interfaces/clientes, testar DNS)

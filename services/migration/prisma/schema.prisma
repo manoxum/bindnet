@@ -78,38 +78,64 @@ model LocalDnsRecord {
 
 // Tabela de rotas da malha de discover mode (roteamento por proximo
 // salto), mantida pelo dns-provider (services/worker/dns/discover_db.go)
-// a partir da troca periodica com os peers configurados em
-// DISCOVER_PEERS. "owner" e o DISCOVER_NODE_NAME do dono final do
-// dominio; "nextHop" e o endereco do vizinho direto para onde este no
-// deve encaminhar a consulta; "distance" e o numero de saltos ate o
-// dono. Sem Redis: o caminho quente de resolucao DNS le de um
+// a partir da troca periodica com os peers configurados no Postgres.
+// "owner" e o DISCOVER_NODE_NAME do dono final do dominio; "nextHop" e
+// o endereco do vizinho direto para onde este no deve encaminhar a
+// consulta; "distance" e o numero de saltos ate o dono. Sem Redis: o
+// caminho quente de resolucao DNS le de um
 // snapshot em memoria, nao desta tabela - ver RULE.md.
 model DiscoverRoute {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  domain     String   @unique
-  owner      String
-  nextHop    String   @map("next_hop")
-  distance   Int
-  source     String
-  state      String   @default("ok")
-  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  domain           String   @unique
+  owner            String
+  ownerFingerprint String?  @map("owner_fingerprint")
+  nextHop          String   @map("next_hop")
+  distance         Int
+  source           String
+  state            String   @default("ok")
+  lastSeenAt       DateTime @default(now()) @map("last_seen_at") @db.Timestamptz
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("discover_routes")
 }
 
-// Servidores Bindnet vizinhos encontrados automaticamente por
-// broadcast UDP na mesma rede local (services/worker/dns/discover_broadcast.go),
-// alem dos configurados manualmente em DISCOVER_PEERS (esses nao
-// aparecem aqui, so os auto-descobertos - servem para o operador ver
-// quem mais existe na rede antes de decidir configurar como peer).
+// Identidade persistente deste servidor Bindnet. Criada pelo dns-provider na
+// primeira inicializacao e preservada em Postgres enquanto o volume existir.
+model DiscoverNodeIdentity {
+  id          Int      @id @default(1)
+  fingerprint String   @unique
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("discover_node_identity")
+}
+
+// Peers diretos efetivamente configurados para troca de rotas. Essa tabela
+// substitui o uso de arquivo .env como fonte de estado, para que limpar
+// volumes tambem limpe os peers adicionados pelo painel.
+model DiscoverConfiguredPeer {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  address     String   @unique
+  nodeName    String?  @map("node_name")
+  fingerprint String?
+  source      String   @default("manual")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("discover_configured_peers")
+}
+
+// Ultimos servidores Bindnet encontrados por busca manual no painel.
+// Esta tabela e informativa: um servidor so participa da malha quando
+// o operador o adiciona explicitamente como peer direto.
 model DiscoverPeer {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  address    String   @unique
-  nodeName   String   @map("node_name")
-  source     String   @default("broadcast")
-  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  address     String   @unique
+  nodeName    String   @map("node_name")
+  fingerprint String?
+  source      String   @default("manual-scan")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("discover_peers")
 }
