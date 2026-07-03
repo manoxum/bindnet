@@ -13,7 +13,8 @@ services:
       - www_data:/var/www
 
     networks:
-      - proxy
+      proxy:
+      wnet:
 
   postgres:
     image: postgres:16-alpine
@@ -86,6 +87,8 @@ networks:
     ipam:
       config:
         - subnet: 10.91.0.0/24
+  wnet:
+    external: true
 
 volumes:
   nginx_config:

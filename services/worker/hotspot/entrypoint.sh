@@ -100,11 +100,10 @@ warn_if_concurrent_ap_sta_risky
 
 # try_create_ap tenta subir o hotspot num canal/banda especificos.
 # Devolve 0 em sucesso (create_ap encerrado com exit code 0 - parada
-# limpa via sinal, ver cleanup/trap mais abaixo), 2 se o create_ap
-# recusou por WIFI_INTERFACE ainda estar associado como estacao
-# (cliente Wi-Fi) - causa que trocar de canal/banda nunca resolve - ou
-# 1 para qualquer outra falha (ex.: "adapter can not transmit" nesse
-# canal especifico).
+# limpa via sinal, ver cleanup/trap mais abaixo), 2 para uma falha que
+# trocar de canal/banda nunca resolve (conflito AP+estacao ou EBUSY ao
+# configurar uma interface virtual), ou 1 para qualquer outra falha
+# (ex.: "adapter can not transmit" nesse canal especifico).
 CREATE_AP_LOG="/tmp/bindnet-hotspot-create_ap.log"
 DNSMASQ_DHCP_LOG="/tmp/bindnet-dnsmasq-dhcp.log"
 
@@ -123,6 +122,20 @@ try_create_ap() {
   local band="$1"
   local channel="$2"
   local status=0
+  local -a virtual_interface_args=()
+
+  # Uma interface AP virtual so e util quando ha uma associacao Wi-Fi
+  # cliente que precisa ser preservada. Em alguns kernels/drivers (observado
+  # com iwlwifi/AX211 no kernel 7.0), o driver aceita criar ap0 mas devolve
+  # EBUSY quando o create_ap tenta trocar o MAC duplicado dessa interface.
+  # Com a placa desconectada, usar diretamente a interface fisica evita essa
+  # operacao sem perder funcionalidade; o uplink continua sendo bn-uplink.
+  if iw dev "${WIFI_INTERFACE}" link 2>/dev/null | grep -q '^Connected to '; then
+    log "Wi-Fi cliente ativo em ${WIFI_INTERFACE}; preservando-o com uma interface AP virtual."
+  else
+    virtual_interface_args=(--no-virt)
+    log "${WIFI_INTERFACE} sem associacao Wi-Fi cliente; usando a interface fisica diretamente em modo AP (--no-virt)."
+  fi
 
   log "Preparando hotspot '${WIFI_SSID}' em ${WIFI_INTERFACE}, internet via ${CREATE_AP_INTERNET_INTERFACE} (alimentado por ${REAL_INTERNET_INTERFACE})."
   log "Regiao Wi-Fi: ${WIFI_COUNTRY}; banda: ${band}GHz; canal: ${channel}."
@@ -139,6 +152,7 @@ try_create_ap() {
   # sem o cleanup rodar - deixando a interface virtual orfa (ver
   # remove_stale_virtual_interfaces acima).
   create_ap \
+    "${virtual_interface_args[@]}" \
     --no-dns \
     --dhcp-dns "${DHCP_DNS_SERVERS}" \
     --country "${WIFI_COUNTRY}" \
@@ -158,13 +172,18 @@ try_create_ap() {
     return 2
   fi
 
+  if [[ "${status}" -ne 0 ]] && grep -qi 'RTNETLINK answers: Resource busy' "${CREATE_AP_LOG}"; then
+    log "ERRO: o driver deixou criar a interface AP virtual, mas recusou configura-la (RTNETLINK: Resource busy). Desconecte ${WIFI_INTERFACE} da rede Wi-Fi cliente para o Bindnet usar automaticamente --no-virt, ou atualize/reverta o kernel/firmware do adaptador. Trocar de canal nao resolve esta causa."
+    return 2
+  fi
+
   return "${status}"
 }
 
 # start_hotspot_auto tenta, em ordem de menor interferencia, cada canal
 # candidato da banda informada. Devolve 0 assim que um canal funcionar,
-# 2 se try_create_ap detectar o conflito AP+estacao (aborta a varredura
-# de canais imediatamente - continuar testando canais so adiaria o
+# 2 se try_create_ap detectar uma falha independente do canal (aborta a
+# varredura imediatamente - continuar testando canais so repetiria o
 # mesmo erro) ou 1 se todos os candidatos da banda forem rejeitados por
 # outro motivo.
 start_hotspot_auto() {

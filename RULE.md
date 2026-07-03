@@ -119,8 +119,14 @@ Regras:
   rede (não à internet compartilhada por `INTERNET_INTERFACE`) no
   momento em que o hotspot sobe: se `iw phy<N> info` reportar a
   combinação `AP`+`managed`, o `create_ap` cria uma interface virtual
-  (`ap0`) e mantém a conexão de estação existente, só que
-  **sobrescrevendo o canal/banda pedido pelo do rádio já associado**
+  (`ap0`) e mantém a conexão de estação existente. Quando a interface
+  física não está associada como cliente Wi-Fi, o hotspot passa
+  `--no-virt` e usa a própria interface física em modo AP: uma virtual
+  não preservaria conexão alguma e alguns drivers/kernels (por exemplo,
+  `iwlwifi`/AX211 no kernel 7.0) deixam criar `ap0`, mas recusam com
+  `RTNETLINK ... Resource busy` a troca do MAC duplicado feita em
+  seguida pelo `create_ap`. Com uma estação ativa, o `create_ap`
+  **sobrescreve o canal/banda pedido pelo do rádio já associado**
   (a combinação normalmente vem com `#channels <= 1` — os dois modos
   têm que estar na mesma frequência; isso é decisão do próprio
   `create_ap`, não da seleção de canal do hotspot). A imagem
@@ -384,7 +390,7 @@ Regras:
   locais pela view container, o Docker daemon do host deve usar
   `DOCKER_HOST_GATEWAY` como DNS upstream. O caminho versionado é
   `sudo scripts/configure-docker-dns.sh`, que grava `"dns":
-  ["10.90.0.1"]` (ou o valor de `DOCKER_HOST_GATEWAY`) em
+  ["10.91.0.1"]` (ou o valor de `DOCKER_HOST_GATEWAY`) em
   `/etc/docker/daemon.json`; aplicar de fato exige restart explícito do
   Docker pelo operador.
 

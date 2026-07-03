@@ -5,7 +5,7 @@ log() {
   printf '[bindnet-docker-dns] %s\n' "$*"
 }
 
-docker_dns="${DOCKER_HOST_GATEWAY:-10.90.0.1}"
+docker_dns="${DOCKER_HOST_GATEWAY:-10.91.0.1}"
 daemon_config="${DOCKER_DAEMON_CONFIG:-/etc/docker/daemon.json}"
 backup="${daemon_config}.bak.$(date +%Y%m%d%H%M%S)"
 tmp="$(mktemp)"
