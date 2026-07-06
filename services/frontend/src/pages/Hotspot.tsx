@@ -135,9 +135,9 @@ export function HotspotPage() {
           <HotspotClientsCard
             clients={clients.data ?? []}
             running={!!status.data?.running}
-            blockPendingMac={block.isPending ? block.variables : undefined}
+            blockPendingMac={block.isPending ? block.variables.mac : undefined}
             unblockPendingMac={unblock.isPending ? unblock.variables : undefined}
-            onBlock={(mac) => block.mutate(mac)}
+            onBlock={(mac, mode) => block.mutate({ mac, mode })}
             onUnblock={(mac) => unblock.mutate(mac)}
           />
         </TabsContent>

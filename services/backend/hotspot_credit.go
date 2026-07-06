@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 )
@@ -149,31 +147,6 @@ func debitDeviceCredit(db *sql.DB, mac string, totalBytes int64) (newBalance int
 		return 0, err
 	}
 	return newBalance, nil
-}
-
-// applyLiveCreditBlock aplica (ou remove) o bloqueio de trafego por
-// falta de credito - diferente de applyLiveHotspotBlock (hostapd
-// deny_acl+deauth, usado so pelo bloqueio manual do admin), aqui o
-// dispositivo continua associado ao Wi-Fi, so o trafego para de
-// passar (DROP via iptables no worker, ver
-// services/worker/controller/traffic_block.go). ip so e necessario
-// para block=true (a regra de download precisa do IP atual); no
-// unblock a remocao e so por comentario, sem IP.
-func applyLiveCreditBlock(ctx context.Context, db *sql.DB, worker *workerClient, mac, ip string, block bool) {
-	iface, err := hotspotWifiInterface(ctx, db)
-	if err != nil {
-		log.Printf("[backend] bloqueio por credito persistido, mas nao foi possivel ler WIFI_INTERFACE: %v", err)
-		return
-	}
-	path := "/hotspot/trafficunblock"
-	payload := map[string]string{"interface": iface, "mac": mac}
-	if block {
-		path = "/hotspot/trafficblock"
-		payload["ip"] = ip
-	}
-	if err := worker.call(ctx, http.MethodPost, path, payload, nil); err != nil {
-		log.Printf("[backend] bloqueio por credito persistido, mas aplicacao ao vivo de %s falhou: %v", mac, err)
-	}
 }
 
 func hotspotCreditBlockedSet(db *sql.DB) (map[string]bool, error) {

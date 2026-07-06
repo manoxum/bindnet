@@ -39,7 +39,7 @@ func applyManualRecharge(ctx context.Context, db *sql.DB, worker *workerClient, 
 			return credit, err
 		}
 		credit.BlockedByCredit = false
-		applyLiveCreditBlock(ctx, db, worker, mac, "", false)
+		applyLiveTrafficBlock(ctx, db, worker, mac, "", false)
 	}
 	return credit, nil
 }

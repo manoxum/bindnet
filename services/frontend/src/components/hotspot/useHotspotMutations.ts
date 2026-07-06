@@ -4,6 +4,12 @@ import { api, ApiError } from "@/lib/api";
 import type { ConfigForm } from "@/components/hotspot/hotspot-schema";
 import type { HotspotClient } from "@/components/hotspot/HotspotClientsCard";
 
+// "deauth" derruba o dispositivo do Wi-Fi (hostapd deny_acl+deauth,
+// comportamento historico); "traffic" so bloqueia o trafego via
+// iptables, dispositivo continua conectado - ver
+// services/backend/hotspot_blocklist.go.
+export type HotspotBlockMode = "deauth" | "traffic";
+
 interface UseHotspotMutationsOptions {
   onSaveSuccess: () => void;
   onRecoverSuccess: () => void;
@@ -57,7 +63,8 @@ export function useHotspotMutations({ onSaveSuccess, onRecoverSuccess }: UseHots
   });
 
   const block = useMutation({
-    mutationFn: (mac: string) => api.post("/hotspot/blocklist", { mac }),
+    mutationFn: ({ mac, mode }: { mac: string; mode: HotspotBlockMode }) =>
+      api.post("/hotspot/blocklist", { mac, mode }),
     onSuccess: () => {
       toast.success("Cliente bloqueado.");
       queryClient.invalidateQueries({ queryKey: ["hotspot", "clients"] });

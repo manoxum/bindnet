@@ -64,6 +64,16 @@ func reconcileDevice(ctx context.Context, db *sql.DB, worker *workerClient, ifac
 		return err
 	}
 
+	// Auto-cura do bloqueio manual em modo "traffic": reforca a cada
+	// ciclo pelo mesmo motivo do bloqueio por credito (a regra de
+	// download some se o hotspot reiniciar, e o IP pode mudar numa
+	// renovacao de DHCP sem restart nenhum).
+	if mode, blocked, err := getHotspotBlockedDeviceMode(db, mac); err != nil {
+		return err
+	} else if blocked && mode == "traffic" {
+		applyLiveTrafficBlock(ctx, db, worker, mac, ip, true)
+	}
+
 	download, upload, err := readDeviceShapingStats(ctx, worker, mac)
 	if err != nil {
 		return err
@@ -116,7 +126,7 @@ func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient
 		return nil
 	}
 	if credit.BlockedByCredit {
-		applyLiveCreditBlock(ctx, db, worker, mac, ip, true)
+		applyLiveTrafficBlock(ctx, db, worker, mac, ip, true)
 	}
 	if totalBytes == 0 {
 		return nil
@@ -129,7 +139,7 @@ func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient
 		if err := blockDeviceForCredit(db, mac); err != nil {
 			return err
 		}
-		applyLiveCreditBlock(ctx, db, worker, mac, ip, true)
+		applyLiveTrafficBlock(ctx, db, worker, mac, ip, true)
 	}
 	return nil
 }

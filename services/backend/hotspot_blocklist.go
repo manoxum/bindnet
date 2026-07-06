@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -13,12 +11,17 @@ import (
 type hotspotBlockedDevice struct {
 	MACAddress string    `json:"macAddress"`
 	Note       string    `json:"note,omitempty"`
+	Mode       string    `json:"mode"`
 	BlockedAt  time.Time `json:"blockedAt"`
 }
 
 type hotspotBlockRequest struct {
 	MAC  string `json:"mac"`
 	Note string `json:"note,omitempty"`
+	// Mode: "deauth" (padrao) derruba o dispositivo do Wi-Fi (hostapd);
+	// "traffic" so bloqueia o trafego via iptables, dispositivo continua
+	// conectado. Ver applyLiveBlockForMode.
+	Mode string `json:"mode,omitempty"`
 }
 
 func registerHotspotBlocklistRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB, worker *workerClient) {
@@ -43,12 +46,20 @@ func registerHotspotBlocklistRoutes(mux *http.ServeMux, admin *administrator, db
 			http.Error(w, "mac invalido", http.StatusBadRequest)
 			return
 		}
-		device, err := upsertHotspotBlockedDevice(db, mac, strings.TrimSpace(req.Note))
+		mode := strings.TrimSpace(req.Mode)
+		if mode == "" {
+			mode = "deauth"
+		}
+		if mode != "deauth" && mode != "traffic" {
+			http.Error(w, "campo 'mode' deve ser 'deauth' ou 'traffic'", http.StatusBadRequest)
+			return
+		}
+		device, err := upsertHotspotBlockedDevice(db, mac, strings.TrimSpace(req.Note), mode)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		applyLiveHotspotBlock(r.Context(), db, worker, mac, true)
+		applyLiveBlockForMode(r.Context(), db, worker, mac, mode, true)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(device)
@@ -60,11 +71,18 @@ func registerHotspotBlocklistRoutes(mux *http.ServeMux, admin *administrator, db
 			http.Error(w, "mac invalido", http.StatusBadRequest)
 			return
 		}
+		mode, found, err := getHotspotBlockedDeviceMode(db, mac)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		if err := deleteHotspotBlockedDevice(db, mac); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		applyLiveHotspotBlock(r.Context(), db, worker, mac, false)
+		if found {
+			applyLiveBlockForMode(r.Context(), db, worker, mac, mode, false)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 }
@@ -89,7 +107,7 @@ func hotspotBlockedSet(db *sql.DB) (map[string]bool, error) {
 
 func listHotspotBlockedDevices(db *sql.DB) ([]hotspotBlockedDevice, error) {
 	rows, err := db.Query(`
-		SELECT mac_address, COALESCE(note, ''), blocked_at
+		SELECT mac_address, COALESCE(note, ''), mode, blocked_at
 		FROM hotspot_blocked_devices
 		ORDER BY blocked_at DESC, mac_address
 	`)
@@ -101,7 +119,7 @@ func listHotspotBlockedDevices(db *sql.DB) ([]hotspotBlockedDevice, error) {
 	devices := []hotspotBlockedDevice{}
 	for rows.Next() {
 		var device hotspotBlockedDevice
-		if err := rows.Scan(&device.MACAddress, &device.Note, &device.BlockedAt); err != nil {
+		if err := rows.Scan(&device.MACAddress, &device.Note, &device.Mode, &device.BlockedAt); err != nil {
 			return nil, err
 		}
 		devices = append(devices, device)
@@ -109,59 +127,32 @@ func listHotspotBlockedDevices(db *sql.DB) ([]hotspotBlockedDevice, error) {
 	return devices, rows.Err()
 }
 
-func upsertHotspotBlockedDevice(db *sql.DB, mac, note string) (hotspotBlockedDevice, error) {
+func upsertHotspotBlockedDevice(db *sql.DB, mac, note, mode string) (hotspotBlockedDevice, error) {
 	var device hotspotBlockedDevice
 	err := db.QueryRow(`
-		INSERT INTO hotspot_blocked_devices (mac_address, note, blocked_at)
-		VALUES ($1, NULLIF($2, ''), CURRENT_TIMESTAMP)
+		INSERT INTO hotspot_blocked_devices (mac_address, note, mode, blocked_at)
+		VALUES ($1, NULLIF($2, ''), $3, CURRENT_TIMESTAMP)
 		ON CONFLICT (mac_address) DO UPDATE
 		SET note = EXCLUDED.note,
+		    mode = EXCLUDED.mode,
 		    blocked_at = CURRENT_TIMESTAMP
-		RETURNING mac_address, COALESCE(note, ''), blocked_at
-	`, mac, note).Scan(&device.MACAddress, &device.Note, &device.BlockedAt)
+		RETURNING mac_address, COALESCE(note, ''), mode, blocked_at
+	`, mac, note, mode).Scan(&device.MACAddress, &device.Note, &device.Mode, &device.BlockedAt)
 	return device, err
+}
+
+func getHotspotBlockedDeviceMode(db *sql.DB, mac string) (mode string, found bool, err error) {
+	err = db.QueryRow(`SELECT mode FROM hotspot_blocked_devices WHERE mac_address = $1`, mac).Scan(&mode)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return mode, true, nil
 }
 
 func deleteHotspotBlockedDevice(db *sql.DB, mac string) error {
 	_, err := db.Exec(`DELETE FROM hotspot_blocked_devices WHERE mac_address = $1`, mac)
 	return err
-}
-
-func reapplyHotspotBlocklist(ctx context.Context, db *sql.DB, worker *workerClient, iface string) {
-	blocked, err := listHotspotBlockedDevices(db)
-	if err != nil {
-		log.Printf("[backend] falha ao listar blocklist do hotspot: %v", err)
-		return
-	}
-	for _, device := range blocked {
-		var lastErr error
-		for attempt := 0; attempt < 6; attempt++ {
-			lastErr = worker.call(ctx, http.MethodPost, "/hotspot/block", map[string]string{
-				"interface": iface,
-				"mac":       device.MACAddress,
-			}, nil)
-			if lastErr == nil {
-				break
-			}
-			time.Sleep(time.Second)
-		}
-		if lastErr != nil {
-			log.Printf("[backend] bloqueio de %s persistido, mas aplicacao ao vivo falhou: %v", device.MACAddress, lastErr)
-		}
-	}
-}
-
-func applyLiveHotspotBlock(ctx context.Context, db *sql.DB, worker *workerClient, mac string, block bool) {
-	iface, err := hotspotWifiInterface(ctx, db)
-	if err != nil {
-		log.Printf("[backend] blocklist persistida, mas nao foi possivel ler WIFI_INTERFACE: %v", err)
-		return
-	}
-	path := "/hotspot/unblock"
-	if block {
-		path = "/hotspot/block"
-	}
-	if err := worker.call(ctx, http.MethodPost, path, map[string]string{"interface": iface, "mac": mac}, nil); err != nil {
-		log.Printf("[backend] blocklist persistida, mas aplicacao ao vivo de %s falhou: %v", mac, err)
-	}
 }

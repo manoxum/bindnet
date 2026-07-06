@@ -160,6 +160,11 @@ model HotspotConfig {
 model HotspotBlockedDevice {
   macAddress String   @id @map("mac_address")
   note       String?
+  // "deauth" (padrao, compativel com o comportamento anterior) derruba
+  // o dispositivo do Wi-Fi via hostapd (deny_acl+deauthenticate);
+  // "traffic" so bloqueia o trafego via iptables, dispositivo continua
+  // associado - ver applyLiveBlockForMode em hotspot_blocklist.go.
+  mode       String   @default("deauth")
   blockedAt  DateTime @default(now()) @map("blocked_at") @db.Timestamptz
 
   @@map("hotspot_blocked_devices")

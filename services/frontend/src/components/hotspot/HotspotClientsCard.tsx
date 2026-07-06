@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Ban, ScanSearch, Settings2, Undo2 } from "lucide-react";
+import { Ban, ScanSearch, Settings2, Undo2, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { SpeedGauge } from "@/components/ui/speed-gauge";
 import { toBitsPerSecond } from "@/components/hotspot/device-detail/DeviceSpeedCard";
 import { useClientsStats } from "@/components/hotspot/useHotspotQueries";
 import { DeviceIdentifyModal } from "@/components/hotspot/DeviceIdentifyModal";
+import type { HotspotBlockMode } from "@/components/hotspot/useHotspotMutations";
 
 export interface HotspotClient {
   mac: string;
@@ -27,7 +28,7 @@ interface HotspotClientsCardProps {
   running: boolean;
   blockPendingMac?: string;
   unblockPendingMac?: string;
-  onBlock: (mac: string) => void;
+  onBlock: (mac: string, mode: HotspotBlockMode) => void;
   onUnblock: (mac: string) => void;
 }
 
@@ -122,15 +123,26 @@ export function HotspotClientsCard({
                         Desbloquear
                       </Button>
                     ) : (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={blockPendingMac === client.mac}
-                        onClick={() => onBlock(client.mac)}
-                      >
-                        <Ban className="h-4 w-4" />
-                        Bloquear
-                      </Button>
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={blockPendingMac === client.mac}
+                          onClick={() => onBlock(client.mac, "traffic")}
+                        >
+                          <WifiOff className="h-4 w-4" />
+                          Cortar tráfego
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={blockPendingMac === client.mac}
+                          onClick={() => onBlock(client.mac, "deauth")}
+                        >
+                          <Ban className="h-4 w-4" />
+                          Bloquear
+                        </Button>
+                      </>
                     )}
                   </div>
                 </TableCell>
