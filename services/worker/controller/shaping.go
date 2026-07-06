@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -91,8 +92,8 @@ func handleShapingGlobal(w http.ResponseWriter, r *http.Request) {
 // o IP atual quando o dispositivo renova o DHCP.
 func handleShapingDevice(w http.ResponseWriter, r *http.Request) {
 	var req shapingDeviceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Interface == "" || req.MAC == "" || req.IP == "" || req.Fwmark == 0 {
-		http.Error(w, "campos 'interface', 'mac', 'ip' e 'fwmark' obrigatorios", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Interface == "" || req.MAC == "" || req.Fwmark == 0 {
+		http.Error(w, "campos 'interface', 'mac' e 'fwmark' obrigatorios", http.StatusBadRequest)
 		return
 	}
 
@@ -179,10 +180,11 @@ func handleShapingTeardown(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// resolveShapingInterfaces traduz WIFI_INTERFACE para a interface
-// virtual real do create_ap (ap0) e devolve o nome do uplink dummy
-// estavel - mesma logica de resolveRunningIface (hotspot.go), reusada
-// aqui porque tc/iptables so fazem sentido contra os nomes reais.
+// resolveShapingInterfaces traduz WIFI_INTERFACE para a interface real
+// do create_ap e devolve a interface real de saida para a internet.
+// create_ap recebe um dummy estavel (bn-uplink), mas o entrypoint do
+// hotspot aplica NAT/forward direto para a interface fisica real; os
+// contadores e filtros precisam casar com esse caminho efetivo.
 func resolveShapingInterfaces(iface string) (apIface, uplinkIface string, err error) {
 	containerID, containerErr := composeServiceContainerID("hotspot")
 	if containerErr != nil || containerID == "" {
@@ -192,8 +194,66 @@ func resolveShapingInterfaces(iface string) (apIface, uplinkIface string, err er
 		return "", "", containerErr
 	}
 	apIface = resolveRunningIface(containerID, iface)
-	uplinkIface = uplinkInterfaceName()
+	uplinkIface = hotspotNATInterface()
+	if uplinkIface == "" {
+		uplinkIface = defaultRouteInterface()
+	}
+	if uplinkIface == "" {
+		uplinkIface = uplinkInterfaceName()
+	}
 	return apIface, uplinkIface, nil
+}
+
+func hotspotNATInterface() string {
+	output, err := exec.Command("iptables", "-w", "-t", "nat", "-S", "BINDNET-HOTSPOT").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return parseHotspotNATInterface(string(output))
+}
+
+func parseHotspotNATInterface(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, "-j MASQUERADE") {
+			continue
+		}
+		if iface := valueAfterToken(strings.Fields(line), "-o"); iface != "" {
+			return iface
+		}
+	}
+	return ""
+}
+
+func defaultRouteInterface() string {
+	output, err := exec.Command("ip", "-o", "route", "get", "1.1.1.1").CombinedOutput()
+	if err == nil {
+		if iface := parseRouteInterface(string(output)); iface != "" {
+			return iface
+		}
+	}
+	output, err = exec.Command("ip", "-o", "route", "show", "default").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return parseRouteInterface(string(output))
+}
+
+func parseRouteInterface(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		if iface := valueAfterToken(strings.Fields(line), "dev"); iface != "" {
+			return iface
+		}
+	}
+	return ""
+}
+
+func valueAfterToken(fields []string, token string) string {
+	for index, field := range fields {
+		if field == token && index+1 < len(fields) {
+			return fields[index+1]
+		}
+	}
+	return ""
 }
 
 func uplinkInterfaceName() string {

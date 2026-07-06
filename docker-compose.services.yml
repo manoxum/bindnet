@@ -44,6 +44,14 @@ services:
     network_mode: host
     env_file:
       - ${BINDNET_ENV_FILE:-.env.main}
+    environment:
+      POSTGRES_HOST: 10.91.0.10
+      POSTGRES_PORT: "5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
 
   worker:
     image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-worker-${STAGE:-main}-${VERSION:-latest}

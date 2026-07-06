@@ -21,11 +21,6 @@ const defaultEnvPath = "/workspace/.env.main"
 // envSections restringe quais chaves cada "section" pode ler/alterar - o
 // backend nunca manda uma chave arbitraria, so uma dessas secoes.
 var envSections = map[string][]string{
-	"hotspot": {
-		"WIFI_INTERFACE", "INTERNET_INTERFACE", "WIFI_SSID", "WIFI_PASSWORD",
-		"WIFI_COUNTRY", "WIFI_CHANNEL", "WIFI_FREQ_BAND", "WIFI_CHANNEL_CANDIDATES",
-		"HOTSPOT_GATEWAY", "HOTSPOT_CIDR",
-	},
 	"dns": {"DNS_LOCAL_TLDS", "DOMAINS", "DISCOVER_REMOTE_ROUTES", "DISCOVER_NODE_NAME", "DISCOVER_PORT"},
 }
 

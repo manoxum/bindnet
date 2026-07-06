@@ -3,28 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"log"
 	"net/http"
 	"net/url"
 	"time"
 )
-
-// hotspotWifiInterface busca WIFI_INTERFACE direto por ctx (variante
-// de currentHotspotInterface para uso fora de um http.Request, como o
-// loop de reconciliacao e as aplicacoes "ao vivo" apos salvar um
-// limite).
-func hotspotWifiInterface(ctx context.Context, worker *workerClient) (string, error) {
-	var config map[string]string
-	if err := worker.call(ctx, http.MethodGet, "/env?section=hotspot", nil, &config); err != nil {
-		return "", err
-	}
-	iface := config["WIFI_INTERFACE"]
-	if iface == "" {
-		return "", errors.New("WIFI_INTERFACE nao configurado")
-	}
-	return iface, nil
-}
 
 // liveHotspotClients busca a lista de clientes conectados agora, com
 // os MACs ja normalizados - usada tanto pelo loop de reconciliacao
@@ -108,7 +91,7 @@ func applyGlobalShaping(ctx context.Context, worker *workerClient, iface string,
 // best-effort (so loga se o hotspot estiver desligado/inacessivel, a
 // config ja foi persistida no Postgres de qualquer forma).
 func applyGlobalShapingLive(ctx context.Context, db *sql.DB, worker *workerClient) {
-	iface, err := hotspotWifiInterface(ctx, worker)
+	iface, err := hotspotWifiInterface(ctx, db)
 	if err != nil {
 		log.Printf("[backend] limite global persistido, mas nao foi possivel ler WIFI_INTERFACE: %v", err)
 		return
@@ -163,7 +146,7 @@ func ensureDeviceShaping(ctx context.Context, db *sql.DB, worker *workerClient, 
 // agora (senao nao ha IP pra aplicar; o loop de reconciliacao cuida
 // quando ele aparecer).
 func applyDeviceShapingLive(ctx context.Context, db *sql.DB, worker *workerClient, mac string) {
-	iface, err := hotspotWifiInterface(ctx, worker)
+	iface, err := hotspotWifiInterface(ctx, db)
 	if err != nil {
 		log.Printf("[backend] limite do dispositivo %s persistido, mas nao foi possivel ler WIFI_INTERFACE: %v", mac, err)
 		return

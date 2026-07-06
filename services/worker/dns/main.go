@@ -79,12 +79,6 @@ func main() {
 			timeout = seconds
 		}
 	}
-	requiredIPs := append([]string{"127.0.0.1"}, dockerGateways...)
-	requiredIPs = append(requiredIPs, hostSourceIPs...)
-	log.Printf("[dns-provider] aguardando IPs locais necessarios: %v", requiredIPs)
-	if err := waitForIPs(requiredIPs, timeout); err != nil {
-		log.Fatalf("[dns-provider] %v", err)
-	}
 
 	db, err := openPostgres()
 	if err != nil {
@@ -138,34 +132,42 @@ func main() {
 	}
 	log.Printf("[dns-provider] no de descoberta '%s' fingerprint=%s, rotas remotas: %s", nodeName, fingerprint, remoteMode)
 
+	// O servidor HTTP de descoberta e o poll de peers nao dependem de
+	// nenhuma interface/IP de rede do host - sobem incondicionalmente,
+	// assim que Postgres/Redis/fingerprint estiverem prontos, para que um
+	// gateway Docker ou HOST_SOURCE_CIDR ausente/desatualizado nunca torne
+	// este no invisivel para quem esta tentando descobri-lo.
 	go startDiscoverServer(cfg, discoverPort)
 	go pollPeers(cfg)
 
-	errCh := make(chan error, 1+len(dockerGateways)+len(hostSourceIPs))
-	go func() { errCh <- serve("127.0.0.1:53", newHandler(cfg, viewHost, "")) }()
 	for _, gateway := range dockerGateways {
 		gateway := gateway
-		go func() { errCh <- serve(gateway+":53", newHandler(cfg, viewContainer, gateway)) }()
+		go serveWhenIPAvailable(gateway, "gateway Docker", timeout, newHandler(cfg, viewContainer, gateway))
 	}
 	for _, hostIP := range hostSourceIPs {
 		hostIP := hostIP
-		go func() { errCh <- serve(hostIP+":53", newHandler(cfg, viewContainer, hostIP)) }()
+		go serveWhenIPAvailable(hostIP, "peer/LAN (HOST_SOURCE_CIDR)", timeout, newHandler(cfg, viewContainer, hostIP))
 	}
-	go serveHotspotWhenAvailable(hotspotGateway, timeout, newHandler(cfg, viewHotspot, hotspotGateway))
+	go serveWhenIPAvailable(hotspotGateway, "hotspot", timeout, newHandler(cfg, viewHotspot, hotspotGateway))
 
-	log.Fatalf("[dns-provider] erro no servidor: %v", <-errCh)
+	log.Fatalf("[dns-provider] erro no servidor: %v", serve("127.0.0.1:53", newHandler(cfg, viewHost, "")))
 }
 
-func serveHotspotWhenAvailable(hotspotGateway string, timeout time.Duration, handler dns.HandlerFunc) {
+// serveWhenIPAvailable espera o IP informado existir como endereco real do
+// host antes de abrir o socket DNS - nunca fatal: se o IP nao aparecer a
+// tempo (gateway Docker/HOST_SOURCE_CIDR desatualizado, hotspot ainda nao
+// subiu), so loga e tenta de novo, sem derrubar o processo nem o servidor
+// de descoberta (ver comentario acima em main()).
+func serveWhenIPAvailable(ip, description string, timeout time.Duration, handler dns.HandlerFunc) {
 	for {
-		log.Printf("[dns-provider] aguardando IP do hotspot para abrir DNS em %s:53", hotspotGateway)
-		if err := waitForIPs([]string{hotspotGateway}, timeout); err != nil {
+		log.Printf("[dns-provider] aguardando IP de %s (%s) para abrir DNS em %s:53", description, ip, ip)
+		if err := waitForIPs([]string{ip}, timeout); err != nil {
 			log.Printf("[dns-provider] aviso: %v", err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		if err := serve(hotspotGateway+":53", handler); err != nil {
-			log.Printf("[dns-provider] aviso: DNS do hotspot encerrou: %v", err)
+		if err := serve(ip+":53", handler); err != nil {
+			log.Printf("[dns-provider] aviso: DNS de %s (%s) encerrou: %v", description, ip, err)
 			time.Sleep(5 * time.Second)
 		}
 	}

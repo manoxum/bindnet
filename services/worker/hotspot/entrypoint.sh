@@ -5,10 +5,242 @@ log() {
   printf '[hotspot] %s\n' "$*"
 }
 
+CONTROL_DIR="${HOTSPOT_CONTROL_DIR:-/run/bindnet-admin/hotspot}"
+SERVICE_LOG="${HOTSPOT_SERVICE_LOG:-/tmp/bindnet-hotspot-service.log}"
+RUNNER_PID_FILE="${CONTROL_DIR}/runner.pid"
+COMMAND="${1:-manager}"
+
+db_host() {
+  printf '%s\n' "${POSTGRES_HOST:-10.91.0.10}"
+}
+
+db_port() {
+  printf '%s\n' "${POSTGRES_PORT:-5432}"
+}
+
+db_user() {
+  printf '%s\n' "${POSTGRES_USER:-bindnet}"
+}
+
+db_name() {
+  printf '%s\n' "${POSTGRES_DB:-bindnet}"
+}
+
+psql_hotspot() {
+  PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
+    -h "$(db_host)" \
+    -p "$(db_port)" \
+    -U "$(db_user)" \
+    -d "$(db_name)" \
+    "$@"
+}
+
+wait_for_hotspot_config_table() {
+  local attempts="${HOTSPOT_DB_WAIT_ATTEMPTS:-90}"
+  local ready
+  for attempt in $(seq 1 "${attempts}"); do
+    ready="$(psql_hotspot -Atqc "SELECT to_regclass('public.hotspot_config') IS NOT NULL" 2>/dev/null || true)"
+    if [[ "${ready}" == "t" ]]; then
+      return 0
+    fi
+    log "Aguardando banco de dados/migrations para carregar configuracao do hotspot (${attempt}/${attempts})."
+    sleep 2
+  done
+  log "ERRO: banco de dados indisponivel ou tabela hotspot_config ausente."
+  return 1
+}
+
+load_runtime_config_from_db() {
+  wait_for_hotspot_config_table || return 1
+
+  INTERNET_INTERFACE="auto"
+  WIFI_COUNTRY="ST"
+  WIFI_CHANNEL="auto"
+  WIFI_FREQ_BAND="auto"
+  HOTSPOT_GATEWAY="192.168.12.1"
+  HOTSPOT_CIDR="192.168.12.0/24"
+  HOTSPOT_DNS_FALLBACKS="1.1.1.1,8.8.8.8"
+  BINDNET_UPLINK_INTERFACE="bn-uplink"
+  UPLINK_MONITOR_INTERVAL="10"
+
+  local rows
+  rows="$(psql_hotspot -At -F $'\t' -c "
+    SELECT key, value
+    FROM hotspot_config
+    WHERE key IN (
+      'WIFI_INTERFACE',
+      'INTERNET_INTERFACE',
+      'WIFI_SSID',
+      'WIFI_PASSWORD',
+      'WIFI_COUNTRY',
+      'WIFI_CHANNEL',
+      'WIFI_FREQ_BAND',
+      'WIFI_CHANNEL_CANDIDATES',
+      'HOTSPOT_GATEWAY',
+      'HOTSPOT_CIDR',
+      'HOTSPOT_DNS_FALLBACKS',
+      'BINDNET_UPLINK_INTERFACE',
+      'UPLINK_MONITOR_INTERVAL'
+    )
+  " 2>/tmp/bindnet-hotspot-db-error.log)" || {
+    log "ERRO: falha ao ler hotspot_config: $(cat /tmp/bindnet-hotspot-db-error.log 2>/dev/null || true)"
+    return 1
+  }
+
+  local key
+  local value
+  while IFS=$'\t' read -r key value; do
+    [[ -n "${key}" ]] || continue
+    case "${key}" in
+      WIFI_INTERFACE|INTERNET_INTERFACE|WIFI_SSID|WIFI_PASSWORD|WIFI_COUNTRY|WIFI_CHANNEL|WIFI_FREQ_BAND|WIFI_CHANNEL_CANDIDATES|HOTSPOT_GATEWAY|HOTSPOT_CIDR|HOTSPOT_DNS_FALLBACKS|BINDNET_UPLINK_INTERFACE|UPLINK_MONITOR_INTERVAL)
+        printf -v "${key}" '%s' "${value}"
+        export "${key}"
+        ;;
+    esac
+  done <<< "${rows}"
+
+  log "Configuracao operacional do hotspot carregada diretamente do banco de dados."
+}
+
+load_runtime_config_if_available() {
+  if ! wait_for_hotspot_config_table >/dev/null 2>&1; then
+    return 1
+  fi
+  load_runtime_config_from_db >/dev/null 2>&1
+}
+
+runtime_pid() {
+  [[ -f "${RUNNER_PID_FILE}" ]] || return 1
+  local pid
+  pid="$(cat "${RUNNER_PID_FILE}" 2>/dev/null || true)"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+  if kill -0 "${pid}" >/dev/null 2>&1; then
+    printf '%s\n' "${pid}"
+    return 0
+  fi
+  rm -f "${RUNNER_PID_FILE}" || true
+  return 1
+}
+
+stop_running_create_ap_instances() {
+  local line
+  local iface
+  if [[ -n "${WIFI_INTERFACE:-}" ]]; then
+    create_ap --stop "${WIFI_INTERFACE}" >/dev/null 2>&1 || true
+  fi
+  while read -r line; do
+    iface="$(awk '{print $2}' <<< "${line}")"
+    [[ -n "${iface}" ]] || continue
+    create_ap --stop "${iface}" >/dev/null 2>&1 || true
+  done < <(create_ap --list-running 2>/dev/null || true)
+}
+
+stop_service() {
+  mkdir -p "${CONTROL_DIR}"
+  load_runtime_config_if_available || true
+
+  local pid
+  if pid="$(runtime_pid)"; then
+    log "Desligando servico do hotspot sem parar o container."
+    kill -TERM "${pid}" >/dev/null 2>&1 || true
+    for _ in $(seq 1 30); do
+      kill -0 "${pid}" >/dev/null 2>&1 || break
+      sleep 1
+    done
+    if kill -0 "${pid}" >/dev/null 2>&1; then
+      log "AVISO: servico do hotspot nao encerrou a tempo; forçando parada."
+      kill -KILL "${pid}" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  stop_running_create_ap_instances
+  rm -f "${RUNNER_PID_FILE}" || true
+}
+
+start_service() {
+  mkdir -p "${CONTROL_DIR}"
+  touch "${SERVICE_LOG}"
+  chmod 0666 "${SERVICE_LOG}" || true
+
+  if runtime_pid >/dev/null; then
+    log "Servico do hotspot ja esta em execucao."
+    return 0
+  fi
+
+  if ! load_runtime_config_from_db; then
+    log "ERRO: configure o hotspot pelo painel antes de iniciar o servico."
+    return 1
+  fi
+
+  log "Iniciando servico do hotspot dentro do container ja existente."
+  nohup "$0" run >> "${SERVICE_LOG}" 2>&1 < /dev/null &
+  echo "$!" > "${RUNNER_PID_FILE}"
+}
+
+status_service() {
+  local running=false
+  local running_instances=""
+  local status="stopped"
+  running_instances="$(create_ap --list-running 2>/dev/null || true)"
+  if runtime_pid >/dev/null && grep -Eq '^[0-9]+[[:space:]]+' <<< "${running_instances}"; then
+    running=true
+    status="running"
+  elif runtime_pid >/dev/null; then
+    running=true
+    status="starting"
+  fi
+  printf '{"running":%s,"status":"%s","startedAt":""}\n' "${running}" "${status}"
+}
+
+manager() {
+  mkdir -p "${CONTROL_DIR}"
+  touch "${SERVICE_LOG}"
+  chmod 0666 "${SERVICE_LOG}" || true
+  log "Container do hotspot pronto; aguardando configuracao/start pelo painel administrativo."
+  tail -n 0 -F "${SERVICE_LOG}" &
+  local tail_pid=$!
+  trap 'kill "${tail_pid}" >/dev/null 2>&1 || true; stop_service >/dev/null 2>&1 || true' EXIT INT TERM
+  while true; do
+    sleep 3600 &
+    wait $! || true
+  done
+}
+
+case "${COMMAND}" in
+  manager)
+    manager
+    exit 0
+    ;;
+  start)
+    start_service
+    exit $?
+    ;;
+  restart)
+    stop_service
+    start_service
+    exit $?
+    ;;
+  stop)
+    stop_service
+    exit 0
+    ;;
+  status)
+    status_service
+    exit 0
+    ;;
+  run)
+    load_runtime_config_from_db || exit 1
+    ;;
+  *)
+    log "ERRO: comando desconhecido: ${COMMAND}"
+    exit 2
+    ;;
+esac
+
 required() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
-    log "ERRO: variavel obrigatoria ausente: ${name}"
+    log "ERRO: variavel obrigatoria ausente: ${name} - configure isso pelo painel (Hotspot -> \"Alterar configuracao\") antes de iniciar o hotspot."
     exit 1
   fi
 }
@@ -29,11 +261,18 @@ WIFI_CHANNEL="${WIFI_CHANNEL:-auto}"
 WIFI_FREQ_BAND="${WIFI_FREQ_BAND:-auto}"
 
 # channel.sh: selecao de banda/canal Wi-Fi. interfaces.sh: resolucao/
-# avisos sobre a interface de internet. Ambos sourced do mesmo
-# diretorio deste script (ver Dockerfile - os tres arquivos vao para
-# /usr/local/bin/).
+# avisos sobre a interface de internet. regulatory.sh: diagnostico do
+# dominio regulatorio Wi-Fi. Todos sourced do mesmo diretorio deste
+# script (ver Dockerfile - os quatro arquivos vao para /usr/local/bin/).
 source "$(dirname "$0")/channel.sh"
 source "$(dirname "$0")/interfaces.sh"
+source "$(dirname "$0")/regulatory.sh"
+
+# So informativo - roda uma vez no inicio pra deixar visivel no log
+# qualquer trava regulatoria de firmware (phy self-managed) antes de
+# qualquer tentativa de canal, ja que isso e indistinguivel do lado de
+# fora de "adapter can not transmit" em canal especifico.
+log_wifi_regulatory_info
 
 normalize_search_domains() {
   local raw="${DNS_SEARCH_DOMAINS:-${DNS_LOCAL_TLDS:-local,test,example}}"
@@ -123,6 +362,12 @@ try_create_ap() {
   local channel="$2"
   local status=0
   local -a virtual_interface_args=()
+
+  # Algumas falhas de create_ap executam limpeza propria antes de
+  # devolver erro. Como tentamos varios canais/bandas no mesmo processo,
+  # garante novamente o uplink virtual antes de cada tentativa para que
+  # o fallback seguinte nao quebre com "bn-uplink is not an interface".
+  setup_bindnet_virtual_uplink
 
   # Uma interface AP virtual so e util quando ha uma associacao Wi-Fi
   # cliente que precisa ser preservada. Em alguns kernels/drivers (observado

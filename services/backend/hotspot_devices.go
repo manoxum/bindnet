@@ -48,7 +48,7 @@ func registerHotspotDeviceRoutes(mux *http.ServeMux, admin *administrator, db *s
 			http.Error(w, "mac invalido", http.StatusBadRequest)
 			return
 		}
-		hostname := liveHotspotHostname(r, worker, mac)
+		hostname := liveHotspotHostname(r, db, worker, mac)
 		info, err := identifyHotspotClient(r.Context(), db, worker, mac, hostname)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -60,7 +60,7 @@ func registerHotspotDeviceRoutes(mux *http.ServeMux, admin *administrator, db *s
 }
 
 func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClient) ([]hotspotClientResponse, error) {
-	iface, err := currentHotspotInterface(r, worker)
+	iface, err := currentHotspotInterface(r.Context(), db)
 	if err != nil {
 		return nil, err
 	}
@@ -146,8 +146,8 @@ func identifyHotspotClient(ctx context.Context, db *sql.DB, worker *workerClient
 	return info, nil
 }
 
-func liveHotspotHostname(r *http.Request, worker *workerClient, mac string) string {
-	iface, err := currentHotspotInterface(r, worker)
+func liveHotspotHostname(r *http.Request, db *sql.DB, worker *workerClient, mac string) string {
+	iface, err := currentHotspotInterface(r.Context(), db)
 	if err != nil {
 		return ""
 	}

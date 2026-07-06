@@ -382,13 +382,23 @@ Regras:
     quebrada, mesmo a resposta `A` estando correta.
 - Para qualquer outro domínio (em qualquer view), a consulta é
   encaminhada para DNS público (`8.8.8.8`, `1.1.1.1`).
-- Antes de abrir os sockets principais, o processo **detecta** os
-  gateways das bridges Docker existentes no host, lê `HOST_SOURCE_CIDR`
-  e **espera** (até `COREDNS_WAIT_TIMEOUT`, padrão 90s) esses IPs e
-  `127.0.0.1` existirem na máquina. O socket de `HOTSPOT_GATEWAY` é
-  tratado em loop separado:
-  se o hotspot ainda não criou o IP, o dns-provider continua vivo e
-  tenta abrir esse listener novamente a cada poucos segundos.
+- O processo **detecta** os gateways das bridges Docker existentes no
+  host e lê `HOST_SOURCE_CIDR` (ou auto-detecta os IPs de LAN quando
+  vazio), mas isso nunca bloqueia nem derruba o processo: o servidor
+  HTTP de descoberta (`GET /discover/info`/`GET /discover/routes`,
+  `DISCOVER_PORT`) e o poll de peers sobem incondicionalmente assim que
+  Postgres/Redis/fingerprint estiverem prontos, sem depender de nenhuma
+  interface de rede do host. Cada socket DNS UDP:53 que depende de um IP
+  específico (gateway Docker, `HOST_SOURCE_CIDR`, `HOTSPOT_GATEWAY`) sobe
+  em loop próprio e não-fatal: se o IP ainda não existir (até
+  `COREDNS_WAIT_TIMEOUT`, padrão 90s por tentativa), só loga um aviso e
+  tenta de novo a cada poucos segundos — nunca derruba o processo nem os
+  demais sockets. Só o socket de `127.0.0.1:53` é síncrono/fatal (loopback
+  sempre deveria existir; se falhar, é um problema diferente e
+  genuinamente fatal). Isso evita que um `HOST_SOURCE_CIDR` desatualizado
+  ou um gateway Docker ausente torne o nó inteiro "invisível" para busca
+  de peers — antes, essa mesma espera derrubava o processo inteiro
+  (`log.Fatalf`) antes do servidor de descoberta sequer subir.
 - `dns-provider` roda com `network_mode: host` (precisa bindar IPs
   reais do host) e por isso **não enxerga a DNS interna do Docker**
   para resolver `postgres`/`redis` pelo nome do serviço — fala com

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { Wifi, Globe, Server, Database, HardDrive, KeyRound, Copy } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -42,8 +43,32 @@ export function DashboardPage() {
     refetchInterval: 10000,
   });
 
+  const hotspotConfig = useQuery<Record<string, string>>({
+    queryKey: ["hotspot", "config"],
+    queryFn: () => api.get<Record<string, string>>("/hotspot/config"),
+  });
+  const hotspotNeedsSetup = !!hotspotConfig.data && (!hotspotConfig.data.WIFI_SSID || !hotspotConfig.data.WIFI_INTERFACE);
+
   return (
     <div className="space-y-6">
+      {hotspotNeedsSetup && (
+        <Card className="border-primary/50">
+          <CardHeader className="flex flex-row items-center gap-2 space-y-0 pb-2">
+            <Wifi className="h-4 w-4 text-primary" />
+            <CardTitle className="text-sm font-medium">Hotspot ainda não configurado</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Defina o SSID, a senha e a interface Wi-Fi antes de ligar o hotspot. Este card some sozinho assim que a
+              configuração for concluída.
+            </p>
+            <Link to="/hotspot" className="text-xs text-primary underline">
+              Configurar hotspot
+            </Link>
+          </CardContent>
+        </Card>
+      )}
+
       {installSecret.data?.secret && (
         <Card className="border-primary/50">
           <CardHeader className="flex flex-row items-center gap-2 space-y-0 pb-2">

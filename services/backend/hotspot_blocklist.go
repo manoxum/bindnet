@@ -48,7 +48,7 @@ func registerHotspotBlocklistRoutes(mux *http.ServeMux, admin *administrator, db
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		applyLiveHotspotBlock(r.Context(), worker, mac, true)
+		applyLiveHotspotBlock(r.Context(), db, worker, mac, true)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(device)
@@ -64,7 +64,7 @@ func registerHotspotBlocklistRoutes(mux *http.ServeMux, admin *administrator, db
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		applyLiveHotspotBlock(r.Context(), worker, mac, false)
+		applyLiveHotspotBlock(r.Context(), db, worker, mac, false)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 }
@@ -151,15 +151,10 @@ func reapplyHotspotBlocklist(ctx context.Context, db *sql.DB, worker *workerClie
 	}
 }
 
-func applyLiveHotspotBlock(ctx context.Context, worker *workerClient, mac string, block bool) {
-	var config map[string]string
-	if err := worker.call(ctx, http.MethodGet, "/env?section=hotspot", nil, &config); err != nil {
+func applyLiveHotspotBlock(ctx context.Context, db *sql.DB, worker *workerClient, mac string, block bool) {
+	iface, err := hotspotWifiInterface(ctx, db)
+	if err != nil {
 		log.Printf("[backend] blocklist persistida, mas nao foi possivel ler WIFI_INTERFACE: %v", err)
-		return
-	}
-	iface := config["WIFI_INTERFACE"]
-	if iface == "" {
-		log.Printf("[backend] blocklist persistida, mas WIFI_INTERFACE esta vazio")
 		return
 	}
 	path := "/hotspot/unblock"

@@ -90,7 +90,12 @@ func registerDNSRoutes(mux *http.ServeMux, worker *workerClient, admin *administ
 	}))
 
 	mux.HandleFunc("POST /api/dns/apply", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		if err := worker.call(r.Context(), http.MethodPost, "/dns/apply", nil, nil); err != nil {
+		hotspotConfig, err := getHotspotConfig(r.Context(), db)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := worker.call(r.Context(), http.MethodPost, "/dns/apply", hotspotConfig, nil); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
@@ -117,9 +122,9 @@ func registerDNSRoutes(mux *http.ServeMux, worker *workerClient, admin *administ
 			http.Error(w, "campo 'hostname' obrigatorio", http.StatusBadRequest)
 			return
 		}
-		var hotspotConfig map[string]string
-		if err := worker.call(r.Context(), http.MethodGet, "/env?section=hotspot", nil, &hotspotConfig); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+		hotspotConfig, err := getHotspotConfig(r.Context(), db)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		var result json.RawMessage

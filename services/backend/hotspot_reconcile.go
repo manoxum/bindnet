@@ -27,11 +27,11 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerClient)
 	var status struct {
 		Running bool `json:"running"`
 	}
-	if err := worker.call(ctx, http.MethodGet, "/containers/hotspot/status", nil, &status); err != nil || !status.Running {
+	if err := worker.call(ctx, http.MethodGet, "/hotspot/status", nil, &status); err != nil || !status.Running {
 		return
 	}
 
-	iface, err := hotspotWifiInterface(ctx, worker)
+	iface, err := hotspotWifiInterface(ctx, db)
 	if err != nil {
 		log.Printf("[backend] reconciliacao: falha ao ler WIFI_INTERFACE: %v", err)
 		return
@@ -119,7 +119,7 @@ func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient
 		if err := blockDeviceForCredit(db, mac); err != nil {
 			return err
 		}
-		applyLiveHotspotBlock(ctx, worker, mac, true)
+		applyLiveHotspotBlock(ctx, db, worker, mac, true)
 	}
 	return nil
 }

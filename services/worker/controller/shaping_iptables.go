@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -35,6 +36,9 @@ func ensureShapingChain() error {
 func ensureDeviceMarkRules(apIface, uplinkIface, mac, ip string, fwmark int) error {
 	upComment := "bn-up-" + mac
 	markHex := "0x" + strconv.FormatInt(int64(fwmark), 16)
+	if !deviceUploadRuleMatches(apIface, uplinkIface, mac, upComment, markHex) {
+		deleteRulesByComment(upComment)
+	}
 	if err := iptablesCheck("-t", "mangle", "-C", shapingChain,
 		"-i", apIface, "-o", uplinkIface, "-m", "mac", "--mac-source", mac,
 		"-m", "comment", "--comment", upComment, "-j", "MARK", "--set-mark", markHex); err != nil {
@@ -45,6 +49,12 @@ func ensureDeviceMarkRules(apIface, uplinkIface, mac, ip string, fwmark int) err
 		}
 	}
 	return refreshDeviceIP(apIface, uplinkIface, mac, ip, fwmark)
+}
+
+func deviceUploadRuleMatches(apIface, uplinkIface, mac, comment, markHex string) bool {
+	return iptablesCheck("-t", "mangle", "-C", shapingChain,
+		"-i", apIface, "-o", uplinkIface, "-m", "mac", "--mac-source", mac,
+		"-m", "comment", "--comment", comment, "-j", "MARK", "--set-mark", markHex) == nil
 }
 
 // refreshDeviceIP e um no-op quando a regra de download do dispositivo
@@ -58,6 +68,10 @@ func ensureDeviceMarkRules(apIface, uplinkIface, mac, ip string, fwmark int) err
 func refreshDeviceIP(apIface, uplinkIface, mac, ip string, fwmark int) error {
 	downComment := "bn-down-" + mac
 	markHex := "0x" + strconv.FormatInt(int64(fwmark), 16)
+	if net.ParseIP(strings.TrimSpace(ip)) == nil {
+		deleteRulesByComment(downComment)
+		return nil
+	}
 	if err := iptablesCheck("-t", "mangle", "-C", shapingChain,
 		"-i", uplinkIface, "-o", apIface, "-d", ip,
 		"-m", "comment", "--comment", downComment, "-j", "MARK", "--set-mark", markHex); err == nil {
@@ -73,26 +87,37 @@ func refreshDeviceIP(apIface, uplinkIface, mac, ip string, fwmark int) error {
 }
 
 // applyGlobalMarkRules conta todo trafego ap0<->bn-uplink, sem casar
-// por MAC/IP - usa "-j RETURN" (nunca ACCEPT/DROP) porque o objetivo e
-// so contar; RETURN devolve o pacote pra cadeia chamadora (FORWARD)
-// sem alterar o veredito, e o contador do iptables incrementa em
-// qualquer regra que case, seja qual for o alvo.
+// por MAC/IP. As regras globais nao usam alvo (-j): no iptables isso
+// incrementa os contadores e deixa o pacote continuar pelo chain, para
+// que as regras por dispositivo tambem contem/marquem o mesmo pacote.
 func applyGlobalMarkRules(apIface, uplinkIface string) error {
-	if err := iptablesCheck("-t", "mangle", "-C", shapingChain,
-		"-i", apIface, "-o", uplinkIface, "-m", "comment", "--comment", "bn-global-up", "-j", "RETURN"); err != nil {
-		if err := runIptables("-t", "mangle", "-A", shapingChain,
-			"-i", apIface, "-o", uplinkIface, "-m", "comment", "--comment", "bn-global-up", "-j", "RETURN"); err != nil {
-			return fmt.Errorf("regra global de upload: %w", err)
-		}
+	if err := ensureGlobalCounterRule(apIface, uplinkIface, "bn-global-up"); err != nil {
+		return fmt.Errorf("regra global de upload: %w", err)
+	}
+	if err := ensureGlobalCounterRule(uplinkIface, apIface, "bn-global-down"); err != nil {
+		return fmt.Errorf("regra global de download: %w", err)
+	}
+	return nil
+}
+
+func ensureGlobalCounterRule(inIface, outIface, comment string) error {
+	deleteRulesByCommentTarget(comment, "RETURN")
+	if !globalCounterRuleMatches(inIface, outIface, comment) {
+		deleteRulesByComment(comment)
 	}
 	if err := iptablesCheck("-t", "mangle", "-C", shapingChain,
-		"-i", uplinkIface, "-o", apIface, "-m", "comment", "--comment", "bn-global-down", "-j", "RETURN"); err != nil {
+		"-i", inIface, "-o", outIface, "-m", "comment", "--comment", comment); err != nil {
 		if err := runIptables("-t", "mangle", "-A", shapingChain,
-			"-i", uplinkIface, "-o", apIface, "-m", "comment", "--comment", "bn-global-down", "-j", "RETURN"); err != nil {
-			return fmt.Errorf("regra global de download: %w", err)
+			"-i", inIface, "-o", outIface, "-m", "comment", "--comment", comment); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func globalCounterRuleMatches(inIface, outIface, comment string) bool {
+	return iptablesCheck("-t", "mangle", "-C", shapingChain,
+		"-i", inIface, "-o", outIface, "-m", "comment", "--comment", comment) == nil
 }
 
 // readCounters le os bytes acumulados nas regras de marca do
@@ -161,6 +186,26 @@ func deleteRulesByComment(comment string) {
 	}
 }
 
+func deleteRulesByCommentTarget(comment, target string) {
+	output, err := exec.Command("iptables", "-w", "-t", "mangle", "-L", shapingChain, "--line-numbers", "-n").CombinedOutput()
+	if err != nil {
+		return
+	}
+	for {
+		lineNumber := findRuleLineByCommentTarget(string(output), comment, target)
+		if lineNumber == "" {
+			return
+		}
+		if err := runIptables("-t", "mangle", "-D", shapingChain, lineNumber); err != nil {
+			return
+		}
+		output, err = exec.Command("iptables", "-w", "-t", "mangle", "-L", shapingChain, "--line-numbers", "-n").CombinedOutput()
+		if err != nil {
+			return
+		}
+	}
+}
+
 func findRuleLineByComment(listing, comment string) string {
 	for _, line := range strings.Split(listing, "\n") {
 		if strings.Contains(line, "/* "+comment+" */") {
@@ -168,6 +213,19 @@ func findRuleLineByComment(listing, comment string) string {
 			if len(fields) > 0 {
 				return fields[0]
 			}
+		}
+	}
+	return ""
+}
+
+func findRuleLineByCommentTarget(listing, comment, target string) string {
+	for _, line := range strings.Split(listing, "\n") {
+		if !strings.Contains(line, "/* "+comment+" */") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) > 1 && fields[1] == target {
+			return fields[0]
 		}
 	}
 	return ""

@@ -141,6 +141,17 @@ model DiscoverPeer {
   @@map("discover_peers")
 }
 
+// Configuracao operacional do hotspot preenchida pelo painel administrativo.
+// Nao fica em .env.main/.env.example; o backend injeta estes valores no
+// container hotspot/dns-provider via worker ao aplicar/iniciar.
+model HotspotConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_config")
+}
+
 // MACs bloqueados manualmente pelo painel (tela "Clientes conectados"
 // do hotspot). services/backend reaplica esta lista via
 // "hostapd_cli deny_acl" (services/worker/controller/hotspot_acl.go)

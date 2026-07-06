@@ -67,7 +67,7 @@ func registerHotspotStatsRoutes(mux *http.ServeMux, admin *administrator, db *sq
 // leitura - devolve zero, sem erro, se o dispositivo nao estiver
 // conectado (nada para medir ainda).
 func deviceLiveStats(ctx context.Context, db *sql.DB, worker *workerClient, mac string) (hotspotDeviceStatsResponse, error) {
-	iface, err := hotspotWifiInterface(ctx, worker)
+	iface, err := hotspotWifiInterface(ctx, db)
 	if err != nil {
 		return hotspotDeviceStatsResponse{}, err
 	}
@@ -84,7 +84,7 @@ func deviceLiveStats(ctx context.Context, db *sql.DB, worker *workerClient, mac 
 // usada pela tela de clientes conectados, que mostra um velocimetro
 // por linha.
 func allClientsLiveStats(ctx context.Context, db *sql.DB, worker *workerClient) ([]hotspotClientStatsEntry, error) {
-	iface, err := hotspotWifiInterface(ctx, worker)
+	iface, err := hotspotWifiInterface(ctx, db)
 	if err != nil {
 		return nil, err
 	}

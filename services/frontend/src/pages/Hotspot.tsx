@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import { HotspotClientsCard } from "@/components/hotspot/HotspotClientsCard";
 import { HotspotSummaryCard } from "@/components/hotspot/HotspotSummaryCard";
 import { GlobalLimitsCard } from "@/components/hotspot/GlobalLimitsCard";
 import { configSchema, type ConfigForm } from "@/components/hotspot/hotspot-schema";
+import { generateRandomWifiPassword } from "@/components/hotspot/generate-password";
 import { useHotspotQueries } from "@/components/hotspot/useHotspotQueries";
 import { useHotspotMutations } from "@/components/hotspot/useHotspotMutations";
 import { LogsPanel } from "@/components/LogsPanel";
@@ -19,6 +20,7 @@ export function HotspotPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [confirmRecoverOpen, setConfirmRecoverOpen] = useState(false);
+  const autoPromptedRef = useRef(false);
 
   const { status, config, interfaces, clients, blocklist } = useHotspotQueries();
   const { save, apply, start, stop, recoverWifi, identify, block, unblock } = useHotspotMutations({
@@ -30,22 +32,43 @@ export function HotspotPage() {
     resolver: zodResolver(configSchema),
   });
 
-  useEffect(() => {
-    if (config.data) {
-      reset({
-        WIFI_SSID: config.data.WIFI_SSID ?? "",
-        WIFI_PASSWORD: config.data.WIFI_PASSWORD ?? "",
-        WIFI_INTERFACE: config.data.WIFI_INTERFACE ?? "",
-        INTERNET_INTERFACE: config.data.INTERNET_INTERFACE ?? "",
-        WIFI_COUNTRY: config.data.WIFI_COUNTRY ?? "ST",
-        WIFI_CHANNEL: config.data.WIFI_CHANNEL ?? "auto",
-        WIFI_FREQ_BAND: config.data.WIFI_FREQ_BAND ?? "auto",
-      });
-    }
-  }, [config.data, reset]);
-
   const wifiInterfaces = interfaces.data?.filter((i) => i.type === "wifi") ?? [];
   const networkInterfaces = interfaces.data ?? [];
+
+  // Preenche o formulario assim que config+interfaces carregarem. Quando
+  // ainda nao configurado (instalacao nova), sugere valores inteligentes
+  // em vez de deixar em branco: interface Wi-Fi unica ja vem selecionada e
+  // uma senha aleatoria ja vem pronta pro operador aceitar ou trocar. Se
+  // SSID/interface ainda estiverem vazios, abre o dialogo de configuracao
+  // automaticamente uma unica vez, em vez de depender do operador saber
+  // clicar em "Alterar configuracao".
+  useEffect(() => {
+    if (!config.data || !interfaces.data) return;
+    const needsSetup = !config.data.WIFI_SSID || !config.data.WIFI_INTERFACE;
+    const suggestedInterface =
+      config.data.WIFI_INTERFACE || (wifiInterfaces.length === 1 ? wifiInterfaces[0].name : "");
+    reset({
+      WIFI_SSID: config.data.WIFI_SSID ?? "",
+      WIFI_PASSWORD: config.data.WIFI_PASSWORD || generateRandomWifiPassword(),
+      WIFI_INTERFACE: suggestedInterface,
+      INTERNET_INTERFACE: config.data.INTERNET_INTERFACE || "auto",
+      WIFI_COUNTRY: config.data.WIFI_COUNTRY ?? "ST",
+      WIFI_CHANNEL: config.data.WIFI_CHANNEL ?? "auto",
+      WIFI_FREQ_BAND: config.data.WIFI_FREQ_BAND ?? "auto",
+      WIFI_CHANNEL_CANDIDATES: config.data.WIFI_CHANNEL_CANDIDATES ?? "",
+      HOTSPOT_GATEWAY: config.data.HOTSPOT_GATEWAY || "192.168.12.1",
+      HOTSPOT_CIDR: config.data.HOTSPOT_CIDR || "192.168.12.0/24",
+      HOTSPOT_DNS_FALLBACKS: config.data.HOTSPOT_DNS_FALLBACKS ?? "1.1.1.1,8.8.8.8",
+      BINDNET_UPLINK_INTERFACE: config.data.BINDNET_UPLINK_INTERFACE || "bn-uplink",
+      UPLINK_MONITOR_INTERVAL: config.data.UPLINK_MONITOR_INTERVAL || "10",
+    });
+    if (needsSetup && !autoPromptedRef.current) {
+      autoPromptedRef.current = true;
+      setConfigOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.data, interfaces.data, reset]);
+
   const connectedCount = clients.data?.length ?? 0;
   const blockedCount = blocklist.data?.length ?? 0;
 
@@ -129,8 +152,7 @@ export function HotspotPage() {
           <DialogHeader>
             <DialogTitle>Configuração do hotspot</DialogTitle>
             <DialogDescription>
-              Salvar grava no .env; "Aplicar" recria o hotspot para assumir os novos valores (derruba a conexão por
-              alguns segundos).
+              Salvar grava no painel administrativo; "Aplicar" recria o hotspot para assumir os novos valores.
             </DialogDescription>
           </DialogHeader>
           <HotspotConfigForm

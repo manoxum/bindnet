@@ -18,6 +18,7 @@ RUN apk add --no-cache \
     iptables \
     iw \
     kea-dhcp4 \
+    postgresql-client \
     procps \
     util-linux \
     wireless-tools
@@ -30,8 +31,8 @@ RUN curl -fsSL https://raw.githubusercontent.com/oblique/create_ap/master/create
     && rm /tmp/patch-create-ap.sh \
     && chmod +x /usr/local/bin/create_ap
 
-COPY entrypoint.sh channel.sh interfaces.sh /usr/local/bin/
+COPY entrypoint.sh channel.sh interfaces.sh regulatory.sh /usr/local/bin/
 RUN mv /usr/local/bin/entrypoint.sh /usr/local/bin/hotspot-entrypoint.sh \
-    && chmod +x /usr/local/bin/hotspot-entrypoint.sh /usr/local/bin/channel.sh /usr/local/bin/interfaces.sh
+    && chmod +x /usr/local/bin/hotspot-entrypoint.sh /usr/local/bin/channel.sh /usr/local/bin/interfaces.sh /usr/local/bin/regulatory.sh
 
 ENTRYPOINT ["/usr/local/bin/hotspot-entrypoint.sh"]
