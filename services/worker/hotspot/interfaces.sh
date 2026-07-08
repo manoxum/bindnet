@@ -40,6 +40,14 @@ is_real_internet_interface() {
   local iface="$1"
   [[ -d "/sys/class/net/${iface}" ]] || return 1
   [[ "${iface}" != "${BINDNET_UPLINK_INTERFACE}" ]] || return 1
+  # WIFI_INTERFACE nunca e candidata a internet, mesmo quando create_ap
+  # roda em --no-virt (a placa fisica do hotspot serve o AP diretamente,
+  # sem a interface virtual ap0/ap[0-9]* que o padrao abaixo ja exclui) -
+  # sem isso, o monitor automatico (best_internet_interface) pode
+  # escolher o proprio radio do hotspot como "fonte de internet" quando
+  # ele aparece UP, alternando NAT/forward para ele a cada ciclo
+  # (UPLINK_MONITOR_INTERVAL) e derrubando o beacon/clientes associados.
+  [[ "${iface}" != "${WIFI_INTERFACE}" ]] || return 1
   case "${iface}" in
     lo|ap0|ap[0-9]*|bn-*|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) return 1 ;;
   esac

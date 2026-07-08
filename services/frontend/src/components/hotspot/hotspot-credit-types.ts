@@ -10,7 +10,7 @@ export interface HotspotCredit {
   blockedByCredit: boolean;
 }
 
-export type HotspotCreditEntryType = "manual_recharge" | "auto_recharge" | "debit";
+export type HotspotCreditEntryType = "manual_recharge" | "auto_recharge" | "debit" | "voucher_redemption";
 
 export interface HotspotCreditHistoryEntry {
   entryType: HotspotCreditEntryType;

@@ -13,6 +13,7 @@ const ENTRY_LABELS: Record<HotspotCreditEntryType, string> = {
   manual_recharge: "Recarga manual",
   auto_recharge: "Recarga automática",
   debit: "Consumo",
+  voucher_redemption: "Voucher resgatado",
 };
 
 // Extrato somente leitura da conta corrente de credito - cada recarga

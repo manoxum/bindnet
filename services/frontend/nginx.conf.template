@@ -1,13 +1,16 @@
 server {
-    listen 80;
+    listen ${FRONTEND_PORT};
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
 
     # Repassa a API para o backend na mesma origem, evitando CORS - o
-    # browser so fala com a porta do frontend.
+    # browser so fala com a porta do frontend. Backend na porta
+    # publicada em localhost (network_mode: host em ambos, ver
+    # docker-compose.services.yml) em vez do nome de servico Docker -
+    # frontend nao esta mais na rede bridge "proxy".
     location /api/ {
-        proxy_pass http://backend:8090/api/;
+        proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

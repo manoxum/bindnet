@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"log"
+	"net/http"
 	"time"
 )
 
@@ -25,21 +27,19 @@ func applyManualRecharge(ctx context.Context, db *sql.DB, worker *workerClient, 
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE mac_address = $1
 		RETURNING mac_address, enabled, balance_bytes, recharge_amount_bytes, recharge_period,
-		          plafond_bytes, next_recharge_at, blocked_by_credit
+		          plafond_bytes, next_recharge_at, blocked_by_credit, configured
 	`, mac, amountBytes).Scan(&credit.MACAddress, &credit.Enabled, &credit.BalanceBytes, &credit.RechargeAmountBytes,
-		&credit.RechargePeriod, &credit.PlafondBytes, &credit.NextRechargeAt, &credit.BlockedByCredit)
+		&credit.RechargePeriod, &credit.PlafondBytes, &credit.NextRechargeAt, &credit.BlockedByCredit, &credit.Configured)
 	if err != nil {
 		return hotspotDeviceCredit{}, err
 	}
 	if err := recordCreditHistory(db, mac, "manual_recharge", amountBytes, credit.BalanceBytes); err != nil {
 		return hotspotDeviceCredit{}, err
 	}
-	if credit.BlockedByCredit && credit.BalanceBytes > 0 {
-		if err := unblockDeviceForCredit(db, mac); err != nil {
+	if credit.BalanceBytes > 0 {
+		if err := unblockCreditIfNeeded(ctx, db, worker, mac, &credit); err != nil {
 			return credit, err
 		}
-		credit.BlockedByCredit = false
-		applyLiveTrafficBlock(ctx, db, worker, mac, "", false)
 	}
 	return credit, nil
 }
@@ -54,38 +54,95 @@ func blockDeviceForCredit(db *sql.DB, mac string) error {
 	return err
 }
 
-// upsertDeviceCreditConfig grava a config de recarga. next_recharge_at
-// so e recalculado (ancorado a partir de agora) quando o periodo muda
-// ou a linha ainda nao tinha nenhum agendamento - trocar so o valor da
-// recarga ou o plafond nao reinicia o relogio.
+// unblockCreditIfNeeded desbloqueia ao vivo um dispositivo que estava
+// bloqueado por falta de credito (no-op se nao estava) - compartilhado
+// por applyManualRecharge, redeemVoucher (hotspot_vouchers.go) e
+// syncDeviceCreditFromProfile (hotspot_profiles_apply.go).
+func unblockCreditIfNeeded(ctx context.Context, db *sql.DB, worker *workerClient, mac string, credit *hotspotDeviceCredit) error {
+	if !credit.BlockedByCredit {
+		return nil
+	}
+	if err := unblockDeviceForCredit(db, mac); err != nil {
+		return err
+	}
+	credit.BlockedByCredit = false
+	applyLiveTrafficBlock(ctx, db, worker, mac, "", false)
+	applyCaptivePortalRedirect(ctx, db, worker, mac, false)
+	return nil
+}
+
+// applyCaptivePortalRedirect liga/desliga o redirecionamento
+// automatico do portal cativo para um MAC bloqueado por falta de
+// credito (nunca para o bloqueio manual do admin, ver
+// services/worker/controller/captive_portal.go) - best-effort, so
+// loga em falha, ja que o bloqueio de trafego em si (applyLiveTrafficBlock)
+// e a garantia principal e ja foi aplicado separadamente.
+func applyCaptivePortalRedirect(ctx context.Context, db *sql.DB, worker *workerClient, mac string, enable bool) {
+	iface, err := hotspotWifiInterface(ctx, db)
+	if err != nil {
+		return
+	}
+	if !enable {
+		if err := worker.call(ctx, http.MethodPost, "/hotspot/captiveportal/disable", map[string]string{"interface": iface, "mac": mac}, nil); err != nil {
+			log.Printf("[backend] falha ao desligar portal cativo de %s: %v", mac, err)
+		}
+		return
+	}
+	portalURL, err := hotspotPortalURL(ctx, db)
+	if err != nil {
+		log.Printf("[backend] falha ao montar URL do portal cativo para %s: %v", mac, err)
+		return
+	}
+	if err := worker.call(ctx, http.MethodPost, "/hotspot/captiveportal/enable",
+		map[string]string{"interface": iface, "mac": mac, "portalUrl": portalURL}, nil); err != nil {
+		log.Printf("[backend] falha ao ligar portal cativo de %s: %v", mac, err)
+	}
+}
+
+// computeNextRechargeAt decide o proximo agendamento de recarga
+// periodica: mantem o relogio atual quando o periodo nao mudou (so
+// trocar o valor da recarga ou o plafond nao reinicia o relogio), e so
+// ancora um novo relogio a partir de agora quando o periodo muda ou
+// nunca existiu. Reusada por upsertDeviceCreditConfig (config manual do
+// admin) e por applyCreditPolicy (hotspot_profiles_apply.go, config
+// vinda do perfil).
+func computeNextRechargeAt(existingPeriod *string, existingNext *time.Time, newPeriod *string) *time.Time {
+	switch {
+	case newPeriod == nil:
+		return nil
+	case existingPeriod == nil || *existingPeriod != *newPeriod:
+		next := time.Now().Add(periodDuration(*newPeriod))
+		return &next
+	default:
+		return existingNext
+	}
+}
+
+// upsertDeviceCreditConfig grava a config de recarga definida a mao
+// pelo admin - marca configured=true, o que faz o dispositivo parar de
+// herdar politica de credito do perfil vinculado (ver
+// syncDeviceCreditFromProfile).
 func upsertDeviceCreditConfig(db *sql.DB, mac string, req hotspotCreditConfigRequest) error {
-	existing, found, err := getDeviceCreditPeriod(db, mac)
+	existingPeriod, _, err := getDeviceCreditPeriod(db, mac)
 	if err != nil {
 		return err
 	}
-	var nextRechargeAt *time.Time
-	switch {
-	case req.RechargePeriod == nil:
-		nextRechargeAt = nil
-	case !found || existing == nil || *existing != *req.RechargePeriod:
-		next := time.Now().Add(periodDuration(*req.RechargePeriod))
-		nextRechargeAt = &next
-	default:
-		nextRechargeAt, err = getDeviceNextRechargeAt(db, mac)
-		if err != nil {
-			return err
-		}
+	existingNext, err := getDeviceNextRechargeAt(db, mac)
+	if err != nil {
+		return err
 	}
+	nextRechargeAt := computeNextRechargeAt(existingPeriod, existingNext, req.RechargePeriod)
 
 	_, err = db.Exec(`
-		INSERT INTO hotspot_device_credit (mac_address, enabled, recharge_amount_bytes, recharge_period, plafond_bytes, next_recharge_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+		INSERT INTO hotspot_device_credit (mac_address, enabled, recharge_amount_bytes, recharge_period, plafond_bytes, next_recharge_at, configured, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, true, CURRENT_TIMESTAMP)
 		ON CONFLICT (mac_address) DO UPDATE
 		SET enabled = EXCLUDED.enabled,
 		    recharge_amount_bytes = EXCLUDED.recharge_amount_bytes,
 		    recharge_period = EXCLUDED.recharge_period,
 		    plafond_bytes = EXCLUDED.plafond_bytes,
 		    next_recharge_at = EXCLUDED.next_recharge_at,
+		    configured = true,
 		    updated_at = CURRENT_TIMESTAMP
 	`, mac, req.Enabled, req.RechargeAmountBytes, req.RechargePeriod, req.PlafondBytes, nextRechargeAt)
 	return err
@@ -120,6 +177,9 @@ func getDeviceCreditPeriod(db *sql.DB, mac string) (*string, bool, error) {
 func getDeviceNextRechargeAt(db *sql.DB, mac string) (*time.Time, error) {
 	var next sql.NullTime
 	err := db.QueryRow(`SELECT next_recharge_at FROM hotspot_device_credit WHERE mac_address = $1`, mac).Scan(&next)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

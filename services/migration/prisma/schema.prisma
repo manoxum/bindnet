@@ -191,6 +191,12 @@ model HotspotDeviceInfo {
   firstSeenAt DateTime? @map("first_seen_at") @db.Timestamptz
   lastSeenAt  DateTime? @map("last_seen_at") @db.Timestamptz
 
+  // Perfil vinculado (services/backend/hotspot_profiles_apply.go) - sem
+  // FK proposital (mesmo padrao das demais tabelas hotspot_device_*).
+  // DEFAULT aponta pro perfil "Padrao" semeado pela migration, entao
+  // todo dispositivo (novo ou ja existente) ja nasce vinculado a ele.
+  profileId String? @map("profile_id") @db.Uuid
+
   @@map("hotspot_device_info")
 }
 
@@ -278,6 +284,10 @@ model HotspotDeviceTraffic {
 // blockedByCredit fica separado de HotspotBlockedDevice (bloqueio
 // manual do admin) de proposito - os dois mecanismos de bloqueio nao
 // devem se confundir. recharge_period null = so recarga manual.
+// configured=true quando o admin configurou credito manualmente para
+// esse MAC (override vence sobre o perfil); false quando a linha so
+// existe porque ensureDeviceCreditRow criou de forma preguicosa - ver
+// services/backend/hotspot_profiles_apply.go (syncDeviceCreditFromProfile).
 model HotspotDeviceCredit {
   macAddress          String    @id @map("mac_address")
   enabled             Boolean   @default(false)
@@ -287,15 +297,16 @@ model HotspotDeviceCredit {
   plafondBytes        BigInt?   @map("plafond_bytes")
   nextRechargeAt      DateTime? @map("next_recharge_at") @db.Timestamptz
   blockedByCredit     Boolean   @default(false) @map("blocked_by_credit")
+  configured          Boolean   @default(false)
   updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz
 
   @@map("hotspot_device_credit")
 }
 
 // Historico/extrato de mutacoes de saldo de credito por dispositivo -
-// recarga manual, recarga automatica e debito de trafego (conta
-// corrente de bytes). Sem relacao FK proposital (mesmo padrao das
-// demais tabelas hotspot_device_*).
+// recarga manual, recarga automatica, resgate de voucher e debito de
+// trafego (conta corrente de bytes). Sem relacao FK proposital (mesmo
+// padrao das demais tabelas hotspot_device_*).
 model HotspotDeviceCreditHistory {
   id                BigInt   @id @default(autoincrement())
   macAddress        String   @map("mac_address")
@@ -306,4 +317,77 @@ model HotspotDeviceCreditHistory {
 
   @@index([macAddress, createdAt])
   @@map("hotspot_device_credit_history")
+}
+
+// Perfil de dispositivo (services/backend/hotspot_profiles.go) - bundle
+// nomeado e reutilizavel de limites de trafego (mesmo shape de
+// HotspotDeviceLimits) + politica de credito (subconjunto de
+// HotspotDeviceCredit, so politica, nunca saldo/estado). Todo
+// dispositivo novo (e todo dispositivo ja existente, via DEFAULT da
+// coluna profile_id em HotspotDeviceInfo) comeca vinculado ao perfil
+// "Padrao" (id fixo, isDefault=true, semeado pela migration).
+model HotspotProfile {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String  @unique
+  isDefault Boolean @default(false) @map("is_default")
+
+  downloadRateValue          Int?     @map("download_rate_value")
+  downloadRateUnit           String   @default("mbit") @map("download_rate_unit")
+  uploadRateValue            Int?     @map("upload_rate_value")
+  uploadRateUnit             String   @default("mbit") @map("upload_rate_unit")
+  quotaBytes                 BigInt?  @map("quota_bytes")
+  quotaPeriod                String?  @map("quota_period")
+  quotaThrottleDownloadValue Int?     @map("quota_throttle_download_value")
+  quotaThrottleDownloadUnit  String   @default("mbit") @map("quota_throttle_download_unit")
+  quotaThrottleUploadValue   Int?     @map("quota_throttle_upload_value")
+  quotaThrottleUploadUnit    String   @default("mbit") @map("quota_throttle_upload_unit")
+
+  creditEnabled             Boolean  @default(false) @map("credit_enabled")
+  creditRechargeAmountBytes BigInt?  @map("credit_recharge_amount_bytes")
+  creditRechargePeriod      String?  @map("credit_recharge_period")
+  creditPlafondBytes        BigInt?  @map("credit_plafond_bytes")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_profiles")
+}
+
+// Lote de vouchers (services/backend/hotspot_vouchers.go) - agrupa os
+// vouchers emitidos juntos numa mesma chamada para permitir listagem e
+// impressao em lote. Nao ha relacao Prisma declarada com HotspotVoucher.batchId
+// de proposito (o restante do schema tambem so usa colunas FK simples,
+// sem @relation).
+model HotspotVoucherBatch {
+  id          String   @id
+  amountBytes BigInt   @map("amount_bytes")
+  amountUnit  String   @default("gbyte") @map("amount_unit")
+  quantity    Int
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([createdAt])
+  @@map("hotspot_voucher_batches")
+}
+
+// Voucher/cartao de recarga (services/backend/hotspot_vouchers.go) -
+// emitido pelo admin com um valor fixo em bytes, resgatado uma unica
+// vez pelo proprio dispositivo sem login (identificado pelo MAC de
+// origem, ver services/backend/hotspot_portal.go). status distingue
+// 'active' (ainda nao usado), 'redeemed' (ja resgatado - redeemedByMac/
+// redeemedAt preenchidos) e 'revoked' (cancelado pelo admin antes do uso).
+// batchId agrupa vouchers emitidos juntos (ver HotspotVoucherBatch).
+model HotspotVoucher {
+  code          String    @id
+  batchId       String?   @map("batch_id")
+  amountBytes   BigInt    @map("amount_bytes")
+  status        String    @default("active")
+  note          String?
+  redeemedByMac String?   @map("redeemed_by_mac")
+  redeemedAt    DateTime? @map("redeemed_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([status, createdAt])
+  @@index([batchId])
+  @@map("hotspot_vouchers")
 }

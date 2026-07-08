@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { SelectNative } from "@/components/ui/select-native";
 import { TabsContent } from "@/components/ui/tabs";
 import type { ConfigForm } from "@/components/hotspot/hotspot-schema";
+import { WIFI_COUNTRIES } from "@/components/hotspot/wifi-countries";
 
 interface HotspotRadioTabProps {
   register: UseFormRegister<ConfigForm>;
@@ -17,7 +18,13 @@ export function HotspotRadioTab({ register }: HotspotRadioTabProps) {
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-2">
             <Label htmlFor="WIFI_COUNTRY">País (código Wi-Fi)</Label>
-            <Input id="WIFI_COUNTRY" maxLength={2} {...register("WIFI_COUNTRY")} />
+            <SelectNative id="WIFI_COUNTRY" {...register("WIFI_COUNTRY")}>
+              {WIFI_COUNTRIES.map((country) => (
+                <option key={country.code} value={country.code}>
+                  {country.name}
+                </option>
+              ))}
+            </SelectNative>
           </div>
           <div className="space-y-2">
             <Label htmlFor="WIFI_FREQ_BAND">Banda</Label>

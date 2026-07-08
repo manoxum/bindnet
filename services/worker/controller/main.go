@@ -42,6 +42,8 @@ func main() {
 	registerCARoutes(mux)
 	registerShapingRoutes(mux)
 	registerTrafficBlockRoutes(mux)
+	registerCaptivePortalRoutes(mux)
+	startCaptivePortalResponder()
 
 	log.Println("[worker] API interna pronta em", socketPath)
 	if err := http.Serve(listener, mux); err != nil {

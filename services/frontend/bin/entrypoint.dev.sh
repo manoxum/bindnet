@@ -17,4 +17,4 @@ else
   echo "[frontend-dev] node_modules up to date, skipping npm install"
 fi
 
-exec npm run dev -- --host 0.0.0.0 --port 80
+exec npm run dev -- --host 0.0.0.0 --port "${FRONTEND_PORT:-9090}"

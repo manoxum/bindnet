@@ -1,0 +1,150 @@
+import { useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { bytesToGB } from "@/components/hotspot/hotspot-limits-types";
+import { HotspotProfileForm } from "@/components/hotspot/HotspotProfileForm";
+import { useHotspotProfiles } from "@/components/hotspot/useHotspotProfileQueries";
+import { useHotspotProfileMutations } from "@/components/hotspot/useHotspotProfileMutations";
+import type { HotspotProfile, HotspotProfileRequest } from "@/components/hotspot/hotspot-profile-types";
+
+const emptyProfile: HotspotProfile = {
+  id: "",
+  name: "",
+  isDefault: false,
+  downloadRateValue: null,
+  downloadRateUnit: "mbit",
+  uploadRateValue: null,
+  uploadRateUnit: "mbit",
+  quotaBytes: null,
+  quotaPeriod: null,
+  quotaThrottleDownloadValue: null,
+  quotaThrottleDownloadUnit: "mbit",
+  quotaThrottleUploadValue: null,
+  quotaThrottleUploadUnit: "mbit",
+  creditEnabled: false,
+  creditRechargeAmountBytes: null,
+  creditRechargePeriod: null,
+  creditPlafondBytes: null,
+};
+
+function rateSummary(profile: HotspotProfile) {
+  if (!profile.downloadRateValue && !profile.uploadRateValue) return "sem limite";
+  return `${profile.downloadRateValue ?? "-"} / ${profile.uploadRateValue ?? "-"} ${profile.downloadRateUnit}`;
+}
+
+function quotaSummary(profile: HotspotProfile) {
+  if (!profile.quotaBytes) return "sem cota";
+  return `${bytesToGB(profile.quotaBytes).toFixed(0)}GB / ${profile.quotaPeriod}`;
+}
+
+function creditSummary(profile: HotspotProfile) {
+  if (!profile.creditEnabled) return "não exige crédito";
+  return profile.creditRechargeAmountBytes
+    ? `recarga ${bytesToGB(profile.creditRechargeAmountBytes).toFixed(0)}GB/${profile.creditRechargePeriod}`
+    : "só recarga manual";
+}
+
+export function HotspotProfilesCard() {
+  const profiles = useHotspotProfiles();
+  const { create, update, remove } = useHotspotProfileMutations();
+  const [editing, setEditing] = useState<HotspotProfile | null>(null);
+  const [deleting, setDeleting] = useState<HotspotProfile | null>(null);
+
+  function onSubmit(values: HotspotProfileRequest) {
+    if (editing?.id) {
+      update.mutate({ id: editing.id, profile: values }, { onSuccess: () => setEditing(null) });
+    } else {
+      create.mutate(values, { onSuccess: () => setEditing(null) });
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>Perfis de dispositivo</CardTitle>
+        <Button size="sm" onClick={() => setEditing(emptyProfile)}>
+          <Plus className="h-4 w-4" />
+          Novo perfil
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Nome</TableHead>
+              <TableHead>Taxa</TableHead>
+              <TableHead>Cota</TableHead>
+              <TableHead>Crédito</TableHead>
+              <TableHead className="text-right">Ações</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {(profiles.data ?? []).map((profile) => (
+              <TableRow key={profile.id}>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{profile.name}</span>
+                    {profile.isDefault && <Badge variant="secondary">Padrão</Badge>}
+                  </div>
+                </TableCell>
+                <TableCell className="text-sm">{rateSummary(profile)}</TableCell>
+                <TableCell className="text-sm">{quotaSummary(profile)}</TableCell>
+                <TableCell className="text-sm">{creditSummary(profile)}</TableCell>
+                <TableCell>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setEditing(profile)}>
+                      Editar
+                    </Button>
+                    {!profile.isDefault && (
+                      <Button variant="outline" size="sm" onClick={() => setDeleting(profile)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+            {profiles.data?.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  Nenhum perfil cadastrado.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+
+      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{editing?.id ? "Editar perfil" : "Novo perfil"}</DialogTitle>
+          </DialogHeader>
+          {editing && (
+            <HotspotProfileForm
+              value={editing}
+              onSubmit={onSubmit}
+              pending={create.isPending || update.isPending}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title="Remover perfil"
+        description={`Dispositivos vinculados a "${deleting?.name}" passam a usar o perfil Padrão. Continuar?`}
+        confirmLabel="Remover"
+        variant="destructive"
+        pending={remove.isPending}
+        onConfirm={() => deleting && remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) })}
+      />
+    </Card>
+  );
+}

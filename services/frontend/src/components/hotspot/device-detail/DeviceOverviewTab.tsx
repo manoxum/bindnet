@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useUpdateDeviceIdentity } from "@/components/hotspot/useHotspotMutations";
+import { DeviceProfileSelect } from "@/components/hotspot/device-detail/DeviceProfileSelect";
 import type { HotspotClient } from "@/components/hotspot/HotspotClientsCard";
 
 function OverviewItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
@@ -90,6 +91,7 @@ export function DeviceOverviewTab({ client }: { client: HotspotClient }) {
       />
       <OverviewItem icon={Ban} label="Status" value={client.blocked ? "Bloqueado" : "Ativo"} />
       <AliasItem mac={client.mac} alias={client.alias} />
+      <DeviceProfileSelect mac={client.mac} profileId={client.profileId} />
     </div>
   );
 }

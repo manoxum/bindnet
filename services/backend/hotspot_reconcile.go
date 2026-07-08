@@ -83,7 +83,7 @@ func reconcileDevice(ctx context.Context, db *sql.DB, worker *workerClient, ifac
 		return err
 	}
 
-	limits, _, err := getDeviceLimits(db, mac)
+	limits, err := effectiveDeviceLimits(db, mac)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func reconcileDevice(ctx context.Context, db *sql.DB, worker *workerClient, ifac
 // start/apply, o que apagaria as regras DROP junto - reenviar aqui,
 // mesmo idioma ja usado por ensureDeviceShaping.
 func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient, mac, ip string, totalBytes int64) error {
-	credit, err := ensureDeviceCreditRow(db, mac)
+	credit, err := syncDeviceCreditFromProfile(ctx, db, worker, mac)
 	if err != nil {
 		return err
 	}
@@ -127,6 +127,7 @@ func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient
 	}
 	if credit.BlockedByCredit {
 		applyLiveTrafficBlock(ctx, db, worker, mac, ip, true)
+		applyCaptivePortalRedirect(ctx, db, worker, mac, true)
 	}
 	if totalBytes == 0 {
 		return nil
@@ -140,6 +141,7 @@ func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient
 			return err
 		}
 		applyLiveTrafficBlock(ctx, db, worker, mac, ip, true)
+		applyCaptivePortalRedirect(ctx, db, worker, mac, true)
 	}
 	return nil
 }

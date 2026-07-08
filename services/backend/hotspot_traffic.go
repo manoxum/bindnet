@@ -51,7 +51,7 @@ func registerHotspotTrafficRoutes(mux *http.ServeMux, admin *administrator, db *
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		limits, _, err := getDeviceLimits(db, mac)
+		limits, err := effectiveDeviceLimits(db, mac)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

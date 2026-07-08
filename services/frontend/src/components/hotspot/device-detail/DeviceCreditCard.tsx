@@ -15,6 +15,7 @@ import {
   type RateUnit,
 } from "@/components/hotspot/hotspot-limits-types";
 import { RateUnitOptions } from "@/components/hotspot/RateUnitOptions";
+import { HotspotCreditConfigFields } from "@/components/hotspot/HotspotCreditConfigFields";
 import { useDeviceCredit } from "@/components/hotspot/useHotspotQueries";
 import { useDeviceCreditMutations, type DeviceCreditConfig } from "@/components/hotspot/useHotspotCreditMutations";
 
@@ -87,34 +88,7 @@ export function DeviceCreditCard({ mac }: { mac: string }) {
       </div>
 
       <form className="space-y-4" onSubmit={handleSubmit(onSubmitConfig)}>
-        <div className="flex items-center gap-2">
-          <input id="enabled" type="checkbox" className="h-4 w-4" {...register("enabled")} />
-          <Label htmlFor="enabled">Exigir crédito para este dispositivo trafegar</Label>
-        </div>
-
-        {enabled && (
-          <fieldset className="space-y-4">
-            <legend className="text-sm font-medium text-muted-foreground">Recarga automática (opcional)</legend>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="rechargeAmountGB">Recarga por período (GB)</Label>
-                <Input id="rechargeAmountGB" placeholder="só manual" {...register("rechargeAmountGB")} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="rechargePeriod">Período</Label>
-                <SelectNative id="rechargePeriod" {...register("rechargePeriod")}>
-                  <option value="daily">Diário</option>
-                  <option value="weekly">Semanal</option>
-                  <option value="monthly">Mensal</option>
-                </SelectNative>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="plafondGB">Plafond - teto do saldo (GB)</Label>
-                <Input id="plafondGB" placeholder="sem teto" {...register("plafondGB")} />
-              </div>
-            </div>
-          </fieldset>
-        )}
+        <HotspotCreditConfigFields register={register} enabled={enabled} />
 
         <Button type="submit" disabled={saveConfig.isPending}>
           Salvar

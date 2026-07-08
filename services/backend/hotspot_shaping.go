@@ -141,7 +141,7 @@ func ensureDeviceShaping(ctx context.Context, db *sql.DB, worker *workerClient, 
 	if err != nil {
 		return err
 	}
-	limits, _, err := getDeviceLimits(db, mac)
+	limits, err := effectiveDeviceLimits(db, mac)
 	if err != nil {
 		return err
 	}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Ban, History, ScrollText, Sliders, Wifi } from "lucide-react";
+import { Ban, History, ScrollText, Sliders, Ticket, UserCog, Wifi } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -11,6 +11,8 @@ import { HotspotClientsCard } from "@/components/hotspot/HotspotClientsCard";
 import { HotspotKnownDevicesCard } from "@/components/hotspot/HotspotKnownDevicesCard";
 import { HotspotSummaryCard } from "@/components/hotspot/HotspotSummaryCard";
 import { GlobalLimitsCard } from "@/components/hotspot/GlobalLimitsCard";
+import { HotspotProfilesCard } from "@/components/hotspot/HotspotProfilesCard";
+import { HotspotVouchersCard } from "@/components/hotspot/HotspotVouchersCard";
 import { configSchema, type ConfigForm } from "@/components/hotspot/hotspot-schema";
 import { generateRandomWifiPassword } from "@/components/hotspot/generate-password";
 import { useHotspotQueries } from "@/components/hotspot/useHotspotQueries";
@@ -102,7 +104,7 @@ export function HotspotPage() {
       />
 
       <Tabs defaultValue="connected" className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-5 sm:inline-grid sm:w-auto">
+        <TabsList className="grid h-auto w-full grid-cols-7 sm:inline-grid sm:w-auto">
           <TabsTrigger value="connected" className="gap-2">
             <Wifi className="h-4 w-4" />
             Conectados
@@ -124,6 +126,14 @@ export function HotspotPage() {
           <TabsTrigger value="limits">
             <Sliders className="h-4 w-4" />
             Limites
+          </TabsTrigger>
+          <TabsTrigger value="profiles">
+            <UserCog className="h-4 w-4" />
+            Perfis
+          </TabsTrigger>
+          <TabsTrigger value="vouchers">
+            <Ticket className="h-4 w-4" />
+            Vouchers
           </TabsTrigger>
           <TabsTrigger value="logs">
             <ScrollText className="h-4 w-4" />
@@ -156,6 +166,14 @@ export function HotspotPage() {
 
         <TabsContent value="limits" className="mt-0">
           <GlobalLimitsCard />
+        </TabsContent>
+
+        <TabsContent value="profiles" className="mt-0">
+          <HotspotProfilesCard />
+        </TabsContent>
+
+        <TabsContent value="vouchers" className="mt-0">
+          <HotspotVouchersCard />
         </TabsContent>
 
         <TabsContent value="logs" className="mt-0">

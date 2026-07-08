@@ -126,14 +126,19 @@ services:
   frontend:
     image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-frontend-${STAGE:-main}-${VERSION:-latest}
     restart: unless-stopped
-    expose:
-      - "80"
-    ports:
-      - "${FRONTEND_PORT:-9090}:80"
+    # network_mode: host (em vez de publicar a porta na rede "proxy") -
+    # necessario para que o nginx enxergue o IP real do dispositivo
+    # conectado ao hotspot. Publicar via "ports:" numa rede bridge passa
+    # pelo docker-proxy (userland proxy), que reabre a conexao a partir
+    # do gateway da bridge e descarta o IP de origem - isso quebra a
+    # identificacao do dispositivo por IP em GET /api/hotspot/portal/me
+    # (ver resolvePortalMAC em services/backend/hotspot_portal.go).
+    network_mode: host
+    environment:
+      FRONTEND_PORT: ${FRONTEND_PORT:-9090}
+      BACKEND_PORT: ${BACKEND_PORT:-8090}
     depends_on:
       - backend
-    networks:
-      - proxy
 
 networks:
   proxy:

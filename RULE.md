@@ -270,6 +270,69 @@ scripts tinham, só que dentro do container privilegiado em vez de
   blocklist inteira depois de subir o hotspot (com retry curto,
   já que o `hostapd` leva alguns segundos para ficar pronto).
 
+## Perfis de dispositivo, vouchers de recarga e portal cativo (`services/backend/hotspot_profiles*.go`, `hotspot_vouchers.go`, `hotspot_portal.go`)
+
+- **Perfil** (`hotspot_profiles`) é um bundle nomeado e reutilizável de
+  limites de tráfego (mesmas 10 colunas de `hotspot_device_limits`) +
+  política de crédito (subconjunto de `hotspot_device_credit`: apenas
+  `enabled`/`rechargeAmountBytes`/`rechargePeriod`/`plafondBytes` — nunca
+  saldo/estado). Existe um perfil "Padrão" com id fixo
+  (`00000000-0000-0000-0000-000000000001`, protegido contra remoção),
+  vinculado por padrão a todo dispositivo (`hotspot_device_info.profile_id`
+  tem esse valor como `DEFAULT`, aplicado inclusive a linhas já
+  existentes quando a coluna foi criada).
+- **Ordem de resolução por dispositivo é sempre override > perfil >
+  global**, nunca o contrário:
+  - `effectiveDeviceLimits` (`hotspot_profiles_apply.go`): se o MAC tem
+    linha em `hotspot_device_limits` (configurada manualmente via
+    `PATCH /api/hotspot/devices/{mac}/limits`), essa vence; senão usa o
+    perfil vinculado. Nunca cai para `hotspot_global_limits` — o limite
+    global já é uma camada HTB separada e sempre ativa.
+  - `syncDeviceCreditFromProfile`: só sincroniza a política de crédito
+    do perfil quando `hotspot_device_credit.configured = false`. Essa
+    coluna (distinta de "a linha existe", já que `ensureDeviceCreditRow`
+    cria a linha de forma preguiçosa para qualquer MAC visto) vira
+    `true` assim que o admin configura crédito manualmente
+    (`PATCH .../credit`) ou o dispositivo resgata um voucher — a partir
+    daí o perfil para de influenciar aquele MAC.
+  - Editar um perfil (`PATCH /api/hotspot/profiles/{id}`) reaplica ao
+    vivo (`applyProfileShapingLive`) só nos dispositivos conectados que
+    herdam dele sem override próprio.
+- **Vouchers** (`hotspot_vouchers`) são códigos de recarga
+  (`XXXX-XXXX-XXXX`, `crypto/rand`) com valor fixo em bytes, emitidos em
+  lote pelo admin (`POST /api/hotspot/vouchers`, até 100 por vez) e
+  resgatáveis uma única vez. O resgate (`redeemVoucher`,
+  `hotspot_vouchers.go`) é uma transação que reivindica o código
+  (`UPDATE ... WHERE status='active'`, atômico via lock de linha do
+  Postgres) e credita o saldo exatamente como uma recarga manual —
+  ganha um novo `entry_type` (`voucher_redemption`) no extrato
+  (`hotspot_device_credit_history`). Código inexistente e código já
+  usado devolvem o mesmo erro genérico de propósito (evita virar um
+  oráculo para quem tenta códigos ao acaso).
+- **Portal de autoatendimento** (`GET/POST /api/hotspot/portal/*`,
+  `hotspot_portal.go`) são as únicas rotas do hotspot sem
+  `requireSession` — mesmo precedente de `GET /api/mesh/ca`. O MAC do
+  dispositivo chamador **nunca** vem do corpo/query: é sempre resolvido
+  no servidor a partir do IP de origem (`X-Forwarded-For` ou
+  `RemoteAddr`), cruzado contra `GET /hotspot/clients` (mesma função
+  `liveHotspotClients` já usada pelo resto do hotspot). Falha em
+  resolver o MAC devolve 409 — nunca aceita um MAC alternativo vindo do
+  cliente. A página (`/portal` no frontend, fora de `RequireAuth`) é
+  servida pelo mesmo SPA já publicado, sem porta/serviço novo.
+- **Redirecionamento automático (portal cativo)** não usa DNS: a
+  sondagem de conectividade que o próprio SO do dispositivo já dispara
+  ao entrar numa rede Wi-Fi (HTTP simples, nunca HTTPS) é interceptada
+  por uma regra `iptables -t nat -I PREROUTING ... REDIRECT` por MAC
+  (`services/worker/controller/captive_portal.go`), avaliada antes do
+  `filter/FORWARD` onde vive o DROP de `traffic_block.go` — o
+  dispositivo continua associado ao Wi-Fi, só a porta 80 é desviada
+  para um responder HTTP mínimo que sempre devolve um redirect para
+  `/portal`. Só é ativado quando o dispositivo é bloqueado **por falta
+  de crédito** (`blocked_by_credit`) — nunca pelo bloqueio manual do
+  admin (blocklist modo "traffic"), que continua sem portal cativo de
+  propósito. HTTPS não é interceptado (limitação universal de qualquer
+  portal cativo).
+
 ## Serviço `dns-provider` (servidor DNS split-horizon próprio — `services/worker/dns/`)
 
 Não usa mais CoreDNS/Corefile — é um binário Go próprio (`miekg/dns`),

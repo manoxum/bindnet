@@ -78,3 +78,10 @@ export function quotaValueToBytes(value: number, unit: RateUnit): number {
 export function bytesToQuotaValue(bytes: number, unit: RateUnit): number {
   return bytes / unitToBytesFactor(unit);
 }
+
+// Formata um total de dados na unidade original em que foi informado
+// (ex.: valor de voucher emitido em MB continua exibido em MB, em vez
+// de sempre converter para GB) - ver hotspot-voucher-*.
+export function formatQuotaValue(bytes: number, unit: RateUnit): string {
+  return `${bytesToQuotaValue(bytes, unit).toFixed(0)}${RATE_UNIT_LABELS[unit]}`;
+}

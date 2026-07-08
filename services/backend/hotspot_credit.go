@@ -11,7 +11,11 @@ import (
 // dispositivo marcado como "precisa de credito para trafegar".
 // blockedByCredit fica separado de hotspot_blocked_devices (bloqueio
 // manual do admin) de proposito - os dois mecanismos nao devem se
-// confundir nem se sobrescrever.
+// confundir nem se sobrescrever. Configured=true quando o admin
+// configurou credito manualmente para esse MAC (via PATCH .../credit)
+// ou o dispositivo ja resgatou algum voucher - nesses casos o
+// override vence sobre o perfil vinculado (ver
+// syncDeviceCreditFromProfile em hotspot_profiles_apply.go).
 type hotspotDeviceCredit struct {
 	MACAddress          string
 	Enabled             bool
@@ -21,6 +25,7 @@ type hotspotDeviceCredit struct {
 	PlafondBytes        *int64
 	NextRechargeAt      *time.Time
 	BlockedByCredit     bool
+	Configured          bool
 }
 
 type hotspotCreditConfigRequest struct {
@@ -124,9 +129,9 @@ func ensureDeviceCreditRow(db *sql.DB, mac string) (hotspotDeviceCredit, error) 
 		VALUES ($1)
 		ON CONFLICT (mac_address) DO UPDATE SET mac_address = EXCLUDED.mac_address
 		RETURNING mac_address, enabled, balance_bytes, recharge_amount_bytes, recharge_period,
-		          plafond_bytes, next_recharge_at, blocked_by_credit
+		          plafond_bytes, next_recharge_at, blocked_by_credit, configured
 	`, mac).Scan(&c.MACAddress, &c.Enabled, &c.BalanceBytes, &c.RechargeAmountBytes, &c.RechargePeriod,
-		&c.PlafondBytes, &c.NextRechargeAt, &c.BlockedByCredit)
+		&c.PlafondBytes, &c.NextRechargeAt, &c.BlockedByCredit, &c.Configured)
 	return c, err
 }
 

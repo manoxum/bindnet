@@ -19,15 +19,17 @@ type workerHotspotClient struct {
 }
 
 type hotspotClientResponse struct {
-	MAC        string `json:"mac"`
-	IP         string `json:"ip"`
-	Hostname   string `json:"hostname"`
-	Vendor     string `json:"vendor,omitempty"`
-	DeviceName string `json:"deviceName,omitempty"`
-	OSName     string `json:"osName,omitempty"`
-	Confidence int    `json:"confidence,omitempty"`
-	Alias      string `json:"alias,omitempty"`
-	Blocked    bool   `json:"blocked"`
+	MAC         string `json:"mac"`
+	IP          string `json:"ip"`
+	Hostname    string `json:"hostname"`
+	Vendor      string `json:"vendor,omitempty"`
+	DeviceName  string `json:"deviceName,omitempty"`
+	OSName      string `json:"osName,omitempty"`
+	Confidence  int    `json:"confidence,omitempty"`
+	Alias       string `json:"alias,omitempty"`
+	Blocked     bool   `json:"blocked"`
+	ProfileID   string `json:"profileId,omitempty"`
+	ProfileName string `json:"profileName,omitempty"`
 }
 
 type hotspotDeviceInfo struct {
@@ -86,6 +88,10 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClien
 	if err != nil {
 		return nil, err
 	}
+	profiles, err := hotspotDeviceProfileRefs(db)
+	if err != nil {
+		return nil, err
+	}
 
 	clients := make([]hotspotClientResponse, 0, len(live))
 	for _, client := range live {
@@ -99,6 +105,10 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClien
 		enriched := infoToClientFields(mac, info[mac], blocked[mac] || blockedByCredit[mac])
 		enriched.IP = client.IP
 		enriched.Hostname = client.Hostname
+		if ref, found := profiles[mac]; found {
+			enriched.ProfileID = ref.ID
+			enriched.ProfileName = ref.Name
+		}
 		clients = append(clients, enriched)
 	}
 	return clients, nil

@@ -21,6 +21,8 @@ export interface HotspotClient {
   confidence?: number;
   alias?: string;
   blocked?: boolean;
+  profileId?: string;
+  profileName?: string;
 }
 
 interface HotspotClientsCardProps {
@@ -57,6 +59,7 @@ export function HotspotClientsCard({
             <TableRow>
               <TableHead>MAC</TableHead>
               <TableHead>Endereço</TableHead>
+              <TableHead>Identificação</TableHead>
               <TableHead>Perfil</TableHead>
               <TableHead>Velocidade</TableHead>
               <TableHead>Status</TableHead>
@@ -88,6 +91,9 @@ export function HotspotClientsCard({
                   ) : (
                     <span className="text-sm text-muted-foreground">Sem identificação</span>
                   )}
+                </TableCell>
+                <TableCell>
+                  <span className="text-sm">{client.profileName || "Padrão"}</span>
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-2">
@@ -151,7 +157,7 @@ export function HotspotClientsCard({
             })}
             {running && clients.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   Nenhum cliente conectado.
                 </TableCell>
               </TableRow>
