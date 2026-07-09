@@ -16,11 +16,8 @@ import (
 	"errors"
 	"log"
 	"net"
-	"strings"
 	"time"
 )
-
-const defaultDomain = "localhost.local"
 
 var errCertificateNotRevoked = errors.New("certificado ainda nao foi revogado")
 
@@ -35,38 +32,20 @@ type certificateResponse struct {
 	RevokedAt   *string  `json:"revokedAt,omitempty"`
 }
 
-// normalizeDomain e uma copia byte a byte da funcao homonima do antigo
-// cert-proxy: minusculo, sem porta, sem "." final; cai para
-// defaultDomain se algum rotulo nao passar na validacao [a-z0-9-].
-func normalizeDomain(value string) string {
-	domain := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), "."))
-	if domain == "" {
-		return defaultDomain
-	}
-	if h, _, err := net.SplitHostPort(domain); err == nil {
-		domain = h
-	}
-	if ip := net.ParseIP(domain); ip != nil {
-		return domain
-	}
-	for _, label := range strings.Split(domain, ".") {
-		if label == "" || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
-			return defaultDomain
-		}
-		for _, r := range label {
-			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
-				return defaultDomain
-			}
-		}
-	}
-	return domain
-}
-
 // issueCertificate sempre cria uma linha nova (sem cache de arquivo por
 // dominio, ao contrario do antigo certificadoPara) - emitir e agora uma
 // acao explicita do usuario via UI, nao um lookup implicito por SNI.
-func issueCertificate(db *sql.DB, ca *localCA, rawDomain string) (*certificateResponse, error) {
-	domain := normalizeDomain(rawDomain)
+// rawDomains vira um unico certificado com todos os dominios/IPs como
+// SAN (Subject Alternative Name) - a primeira entrada normalizada e o
+// dominio/CN primario (coluna "domain"), usado como nome de referencia
+// nas listagens e na importacao para o nginx-ui. validityQuantity e
+// validityUnit (days|weeks|months|years) definem NotAfter - invalidas
+// caem para o padrao de 2 anos (ver normalizeValidityPeriod), e o
+// resultado nunca ultrapassa a validade da propria CA.
+func issueCertificate(db *sql.DB, ca *localCA, rawDomains []string, validityQuantity int, validityUnit string) (*certificateResponse, error) {
+	domains := normalizeDomainList(rawDomains)
+	primary := domains[0]
+	quantity, unit := normalizeValidityPeriod(validityQuantity, validityUnit)
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -77,21 +56,27 @@ func issueCertificate(db *sql.DB, ca *localCA, rawDomain string) (*certificateRe
 		return nil, err
 	}
 	now := time.Now()
+	notAfter := certificateExpiry(now, quantity, unit)
+	if notAfter.After(ca.Cert.NotAfter) {
+		notAfter = ca.Cert.NotAfter
+	}
 	tpl := &x509.Certificate{
 		SerialNumber: serialNumber,
-		Subject:      pkix.Name{CommonName: domain},
+		Subject:      pkix.Name{CommonName: primary},
 		NotBefore:    now.Add(-time.Hour),
-		NotAfter:     now.AddDate(2, 0, 0),
+		NotAfter:     notAfter,
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 	var dnsNames, ipAddresses []string
-	if ip := net.ParseIP(domain); ip != nil {
-		tpl.IPAddresses = []net.IP{ip}
-		ipAddresses = []string{domain}
-	} else {
-		tpl.DNSNames = []string{domain}
-		dnsNames = []string{domain}
+	for _, domain := range domains {
+		if ip := net.ParseIP(domain); ip != nil {
+			tpl.IPAddresses = append(tpl.IPAddresses, ip)
+			ipAddresses = append(ipAddresses, domain)
+		} else {
+			tpl.DNSNames = append(tpl.DNSNames, domain)
+			dnsNames = append(dnsNames, domain)
+		}
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, tpl, ca.Cert, &key.PublicKey, ca.Key)
@@ -105,21 +90,21 @@ func issueCertificate(db *sql.DB, ca *localCA, rawDomain string) (*certificateRe
 	err = db.QueryRow(
 		`INSERT INTO certificates (domain, common_name, dns_names, ip_addresses, serial_number, certificate_pem, private_key_pem, issued_at, expires_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-		domain, domain, dnsNames, ipAddresses, serialNumber.String(),
+		primary, primary, dnsNames, ipAddresses, serialNumber.String(),
 		string(certPEM), string(keyPEM), tpl.NotBefore, tpl.NotAfter,
 	).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("[backend] certificado emitido para %s", domain)
+	log.Printf("[backend] certificado emitido para %s (%d dominio(s)/IP(s))", primary, len(domains))
 
-	if err := syncCertificateToNginxUI(domain, string(certPEM), string(keyPEM)); err != nil {
-		log.Printf("[backend] falha ao carregar certificado de %s no nginx-ui: %v", domain, err)
+	if err := syncCertificateToNginxUI(primary, domains, string(certPEM), string(keyPEM)); err != nil {
+		log.Printf("[backend] falha ao carregar certificado de %s no nginx-ui: %v", primary, err)
 	}
 
 	return &certificateResponse{
-		ID: id, Domain: domain, CommonName: domain,
+		ID: id, Domain: primary, CommonName: primary,
 		DNSNames: dnsNames, IPAddresses: ipAddresses,
 		IssuedAt: tpl.NotBefore.Format(time.RFC3339), ExpiresAt: tpl.NotAfter.Format(time.RFC3339),
 	}, nil
@@ -207,48 +192,4 @@ func permanentlyDeleteCertificate(db *sql.DB, id string) error {
 func certificatePEMByID(db *sql.DB, id string) (domain, certificatePEM string, err error) {
 	err = db.QueryRow(`SELECT domain, certificate_pem FROM certificates WHERE id = $1`, id).Scan(&domain, &certificatePEM)
 	return domain, certificatePEM, err
-}
-
-func syncIssuedCertificatesToNginxUI(db *sql.DB) error {
-	rows, err := db.Query(
-		`SELECT domain, certificate_pem, private_key_pem
-		 FROM certificates
-		 WHERE revoked_at IS NULL
-		 ORDER BY created_at ASC`,
-	)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	count := 0
-	failures := 0
-	for rows.Next() {
-		var domain, certificatePEM, privateKeyPEM string
-		if err := rows.Scan(&domain, &certificatePEM, &privateKeyPEM); err != nil {
-			return err
-		}
-		count++
-		if err := syncCertificateToNginxUI(domain, certificatePEM, privateKeyPEM); err != nil {
-			failures++
-			log.Printf("[backend] falha ao importar certificado existente de %s no nginx-ui: %v", domain, err)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if count > 0 {
-		log.Printf("[backend] sync inicial de certificados no nginx-ui concluido: total=%d falhas=%d", count, failures)
-	}
-	return nil
-}
-
-// splitNonEmpty separa valores de array_to_string(coluna, ',') - retorna
-// nil (em vez de []string{""}) quando a coluna original era um array
-// Postgres vazio ou nulo.
-func splitNonEmpty(value string) []string {
-	if value == "" {
-		return nil
-	}
-	return strings.Split(value, ",")
 }

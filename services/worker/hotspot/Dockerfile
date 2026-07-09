@@ -12,7 +12,6 @@ RUN apk add --no-cache \
     curl \
     dnsmasq \
     grep \
-    hostapd \
     iproute2 \
     iptables \
     iw \
@@ -21,6 +20,22 @@ RUN apk add --no-cache \
     procps \
     util-linux \
     wireless-tools
+
+# hostapd: fixado em 2.10-r6 (repo da Alpine 3.20, ultima versao antes
+# do pulo pra 2.11 na Alpine 3.21) em vez do "hostapd" solto do repo da
+# imagem base (Alpine 3.22 = hostapd 2.11). A 2.11 trouxe o codigo
+# inicial de IEEE 802.11be/MLO (Wi-Fi 7) e, com ele, uma regressao
+# conhecida (relatada tambem por outros usuarios de create_ap/hostapd
+# fora deste repo) onde qualquer STA associando/reassociando apos o AP
+# ja estar de pe dispara "Failed to set beacon parameters" seguido de
+# "nl80211: kernel reports: key not allowed" e depois
+# "MLD: Failed to get link BSS for EVENT_ASSOC" em loop - o adaptador
+# fica derrubando/recusando clientes novos indefinidamente ate o
+# container ser reiniciado. A 2.10 nao tem esse codigo de MLO e nao
+# reproduz o problema. libnl3 (dependencia do hostapd) continua vindo
+# do repo normal da imagem base.
+RUN apk add --no-cache hostapd=2.10-r6 \
+    --repository=https://dl-cdn.alpinelinux.org/alpine/v3.20/main
 
 COPY patch-create-ap.sh /tmp/patch-create-ap.sh
 RUN curl -fsSL https://raw.githubusercontent.com/oblique/create_ap/master/create_ap \

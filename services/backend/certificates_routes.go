@@ -15,8 +15,15 @@ import (
 	"net/http"
 )
 
+// issueCertificateRequest.Domains vira um unico certificado com todos
+// os dominios/IPs como SAN - ver comentario de issueCertificate em
+// certificates.go. Aceita dominio curinga (ex.: "*.mydomain") em
+// qualquer posicao da lista. ValidityQuantity/ValidityUnit sao
+// opcionais - vazios/invalidos caem para o padrao de 2 anos.
 type issueCertificateRequest struct {
-	Domain string `json:"domain"`
+	Domains          []string `json:"domains"`
+	ValidityQuantity int      `json:"validityQuantity,omitempty"`
+	ValidityUnit     string   `json:"validityUnit,omitempty"`
 }
 
 type installLocalCARequest struct {
@@ -63,17 +70,19 @@ func registerCertificateRoutes(mux *http.ServeMux, admin *administrator, db *sql
 
 	mux.HandleFunc("POST /api/certificates", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		var req issueCertificateRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Domain == "" {
-			http.Error(w, "campo 'domain' obrigatorio", http.StatusBadRequest)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !hasNonEmptyDomain(req.Domains) {
+			http.Error(w, "campo 'domains' obrigatorio (ao menos um dominio ou IP)", http.StatusBadRequest)
 			return
 		}
 		username, _ := sessionUser(r, admin)
-		cert, err := issueCertificate(db, ca, req.Domain)
+		cert, err := issueCertificate(db, ca, req.Domains, req.ValidityQuantity, req.ValidityUnit)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		audit.record(r.Context(), "certificate_issued", username, map[string]any{"id": cert.ID, "domain": cert.Domain})
+		audit.record(r.Context(), "certificate_issued", username, map[string]any{
+			"id": cert.ID, "domain": cert.Domain, "domains": append(cert.DNSNames, cert.IPAddresses...),
+		})
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(cert)

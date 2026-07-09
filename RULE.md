@@ -532,23 +532,33 @@ Regras:
   3. Senão → gera uma CA nova (`source='generated'`): RSA 4096, válida 10
      anos, CN de `CA_COMMON_NAME` (padrão "Bindnet Local Development
      CA"). Mesmos parâmetros criptográficos do antigo `cert-proxy`.
-- `POST /api/certificates` emite um certificado *leaf* (RSA 2048,
-  válido 2 anos) para o domínio informado, sempre como uma linha nova
-  na tabela `certificates` — sem cache/reuso por domínio, já que
-  emitir é agora uma ação explícita do usuário, não um lookup
-  implícito por SNI.
+- `POST /api/certificates` emite um certificado *leaf* (RSA 2048) a
+  partir de `domains` (lista de domínios/IPs) — todos os itens viram
+  SAN (Subject Alternative Name) de um único certificado; o primeiro
+  item normalizado é o domínio/CN primário, salvo na coluna `domain` e
+  usado como nome de referência nas listagens e na importação para o
+  `nginx-ui`. Um item pode ser um domínio curinga (`*.mydomain`) —
+  cobre o caso de emitir um certificado para `*.mydomain` junto com
+  `app.mydomain`, `app2.mydomain` etc. em uma única emissão. Sempre
+  cria uma linha nova em `certificates` — sem cache/reuso por domínio,
+  já que emitir é agora uma ação explícita do usuário, não um lookup
+  implícito por SNI. `validityQuantity` (inteiro) e `validityUnit`
+  (`days`|`weeks`|`months`|`years`) definem `NotAfter`; ausentes ou
+  inválidos caem para o padrão fixo anterior (2 anos), e o resultado
+  nunca ultrapassa a validade da própria CA local.
 - Após persistir no Postgres, o backend importa o certificado para o
   `nginx-ui`, para que ele apareça em
   `/#/certificates/list?search={}`. Se `NGINX_UI_USERNAME` e
   `NGINX_UI_PASSWORD` estiverem preenchidos, usa a API `/api/certs`;
-  caso contrário, grava os PEMs em `/etc/nginx/ssl/<domínio>/` e
-  registra a linha correspondente no `database.db` do `nginx-ui` via os
-  volumes compartilhados.
-- O nome do domínio é normalizado antes de emitir: minúsculas, sem
-  porta, sem `.` final; se não passar numa validação básica de
-  caracteres (`[a-z0-9-]` por rótulo), cai para `localhost.local` em
-  vez de emitir certificado para um valor não sanitizado — mesma regra
-  do antigo `cert-proxy`.
+  caso contrário, grava os PEMs em `/etc/nginx/ssl/<domínio primário>/`
+  e registra a linha correspondente (com todos os SANs em `domains`) no
+  `database.db` do `nginx-ui` via os volumes compartilhados.
+- Cada domínio/IP é normalizado antes de emitir: minúsculas, sem
+  porta, sem `.` final; o primeiro rótulo pode ser `*` (curinga); se
+  algum rótulo restante não passar numa validação básica de caracteres
+  (`[a-z0-9-]`), aquela entrada cai para `localhost.local` em vez de
+  emitir certificado para um valor não sanitizado — mesma regra do
+  antigo `cert-proxy`, agora aplicada item a item da lista.
 - `DELETE /api/certificates/{id}` revoga: seta `revoked_at`, **nunca
   deleta a linha** — o certificado revogado continua aparecendo na
   listagem dedicada de revogados do Bindnet, com status "revogado", e

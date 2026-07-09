@@ -13,7 +13,6 @@ RUN apk add --no-cache \
     curl \
     dnsmasq \
     grep \
-    hostapd \
     iproute2 \
     iptables \
     iw \
@@ -22,6 +21,13 @@ RUN apk add --no-cache \
     procps \
     util-linux \
     wireless-tools
+
+# hostapd: fixado em 2.10-r6, mesma correcao e mesmo motivo do
+# Dockerfile de producao - ver comentario la para detalhes (regressao
+# de MLO/802.11be na 2.11 causando "Failed to set beacon parameters" /
+# "MLD: Failed to get link BSS for EVENT_ASSOC" em loop).
+RUN apk add --no-cache hostapd=2.10-r6 \
+    --repository=https://dl-cdn.alpinelinux.org/alpine/v3.20/main
 
 COPY patch-create-ap.sh /tmp/patch-create-ap.sh
 RUN curl -fsSL https://raw.githubusercontent.com/oblique/create_ap/master/create_ap \

@@ -5,7 +5,9 @@
 // handshake proprio (troca de chave publica RSA + payload criptografado
 // com RSA-PKCS1v15, ver github.com/0xJacky/Nginx-UI internal/crypto e
 // internal/middleware/encrypted_params.go) - replicado aqui porque nao
-// ha outra forma documentada de autenticar contra ele por HTTP.
+// ha outra forma documentada de autenticar contra ele por HTTP. A
+// importacao local (sem credenciais da API) fica em
+// nginxui_local_store.go.
 package main
 
 import (
@@ -13,7 +15,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -21,12 +22,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 const (
@@ -131,8 +127,11 @@ func fetchNginxUIPublicKey() (*rsa.PublicKey, error) {
 // credenciais do nginx-ui estiverem configuradas, usa a API oficial. Sem
 // credenciais, importa diretamente no estado compartilhado do nginx-ui
 // (database.db + /etc/nginx/ssl) para que o certificado apareca na tela
-// /#/certificates/list logo apos a emissao no painel Bindnet.
-func syncCertificateToNginxUI(domain, certificatePEM, privateKeyPEM string) error {
+// /#/certificates/list logo apos a emissao no painel Bindnet. domain e o
+// dominio/CN primario (usado no nome/caminho); sanDomains e a lista
+// completa de dominios/IPs do certificado (SAN), incluindo o primario -
+// so usada para preencher a coluna "domains" do nginx-ui.
+func syncCertificateToNginxUI(domain string, sanDomains []string, certificatePEM, privateKeyPEM string) error {
 	if nginxUIConfigured() {
 		if err := syncCertificateToNginxUIAPI(domain, certificatePEM, privateKeyPEM); err == nil {
 			return nil
@@ -141,7 +140,7 @@ func syncCertificateToNginxUI(domain, certificatePEM, privateKeyPEM string) erro
 		}
 	}
 
-	return syncCertificateToNginxUILocal(domain, certificatePEM, privateKeyPEM)
+	return syncCertificateToNginxUILocal(domain, sanDomains, certificatePEM, privateKeyPEM)
 }
 
 func syncCertificateToNginxUIAPI(domain, certificatePEM, privateKeyPEM string) error {
@@ -180,141 +179,4 @@ func syncCertificateToNginxUIAPI(domain, certificatePEM, privateKeyPEM string) e
 	}
 	log.Printf("[backend] certificado de %s carregado no nginx-ui", domain)
 	return nil
-}
-
-func syncCertificateToNginxUILocal(domain, certificatePEM, privateKeyPEM string) error {
-	certPath, keyPath := nginxUICertificatePaths(domain)
-	hostCertPath := nginxUIContainerPathToBackendPath(certPath)
-	hostKeyPath := nginxUIContainerPathToBackendPath(keyPath)
-
-	if err := os.MkdirAll(filepath.Dir(hostCertPath), 0755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(hostCertPath, []byte(certificatePEM), 0644); err != nil {
-		return err
-	}
-	if err := os.WriteFile(hostKeyPath, []byte(privateKeyPEM), 0600); err != nil {
-		return err
-	}
-
-	db, err := openNginxUIDatabase()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	domainsJSON, err := json.Marshal([]string{domain})
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC().Format("2006-01-02 15:04:05.000")
-
-	var id int64
-	err = db.QueryRow(
-		`SELECT id FROM certs
-		 WHERE deleted_at IS NULL
-		   AND (name = ? OR (ssl_certificate_path = ? AND ssl_certificate_key_path = ?))
-		 ORDER BY id DESC
-		 LIMIT 1`,
-		domain, certPath, keyPath,
-	).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		_, err = db.Exec(
-			`INSERT INTO certs (
-				created_at, updated_at, name, domains, filename,
-				ssl_certificate_path, ssl_certificate_key_path,
-				auto_cert, challenge_method, key_type, log, sync_node_ids,
-				must_staple, lego_disable_cname_support, revoke_old
-			) VALUES (?, ?, ?, ?, ?, ?, ?, -1, '', 'RSA2048', '', '[]', 0, 0, 0)`,
-			now, now, domain, string(domainsJSON), domain, certPath, keyPath,
-		)
-		if err != nil {
-			return err
-		}
-		log.Printf("[backend] certificado de %s importado no nginx-ui via database local", domain)
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(
-		`UPDATE certs
-		 SET updated_at = ?, domains = ?, filename = ?,
-		     ssl_certificate_path = ?, ssl_certificate_key_path = ?,
-		     auto_cert = -1, key_type = 'RSA2048'
-		 WHERE id = ?`,
-		now, string(domainsJSON), domain, certPath, keyPath, id,
-	)
-	if err != nil {
-		return err
-	}
-	log.Printf("[backend] certificado de %s atualizado no nginx-ui via database local", domain)
-	return nil
-}
-
-func removeCertificateFromNginxUI(domain string) error {
-	certPath, keyPath := nginxUICertificatePaths(domain)
-	db, err := openNginxUIDatabase()
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	now := time.Now().UTC().Format("2006-01-02 15:04:05.000")
-	result, err := db.Exec(
-		`UPDATE certs
-		 SET updated_at = ?, deleted_at = ?
-		 WHERE deleted_at IS NULL
-		   AND (name = ? OR (ssl_certificate_path = ? AND ssl_certificate_key_path = ?))`,
-		now, now, domain, certPath, keyPath,
-	)
-	if err != nil {
-		return err
-	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-
-	if err := os.RemoveAll(filepath.Dir(nginxUIContainerPathToBackendPath(certPath))); err != nil {
-		return err
-	}
-
-	if rowsAffected == 0 {
-		log.Printf("[backend] certificado de %s nao existia na lista do nginx-ui; arquivos locais limpos se existiam", domain)
-		return nil
-	}
-	log.Printf("[backend] certificado de %s removido do nginx-ui", domain)
-	return nil
-}
-
-func openNginxUIDatabase() (*sql.DB, error) {
-	dbPath := filepath.Join(nginxUIBackendDataPath, "database.db")
-	if _, err := os.Stat(dbPath); err != nil {
-		return nil, fmt.Errorf("database do nginx-ui indisponivel em %s: %w", dbPath, err)
-	}
-
-	db, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=busy_timeout(5000)")
-	if err != nil {
-		return nil, err
-	}
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, err
-	}
-	return db, nil
-}
-
-func nginxUICertificatePaths(domain string) (certPath, keyPath string) {
-	dir := filepath.ToSlash(filepath.Join(nginxUIContainerNginxConfPath, "ssl", nginxUICertificateDirName(domain)))
-	return dir + "/server.crt", dir + "/server.key"
-}
-
-func nginxUIContainerPathToBackendPath(path string) string {
-	return filepath.Join(nginxUIBackendConfigPath, strings.TrimPrefix(path, nginxUIContainerNginxConfPath))
-}
-
-func nginxUICertificateDirName(domain string) string {
-	return strings.NewReplacer(":", "_").Replace(domain)
 }

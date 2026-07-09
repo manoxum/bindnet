@@ -1,25 +1,15 @@
 import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ShieldCheck, ShieldX } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CertificateList } from "@/components/certificates/CertificateList";
-import type { Certificate } from "@/components/certificates/certificate-types";
+import { IssueCertificateForm } from "@/components/certificates/IssueCertificateForm";
+import type { Certificate, IssueCertificateRequest } from "@/components/certificates/certificate-types";
 import { api, ApiError } from "@/lib/api";
 import { usePageHeader } from "@/hooks/usePageHeader";
-
-const issueSchema = z.object({
-  domain: z.string().min(1, "Informe um domínio ou IP"),
-});
-type IssueForm = z.infer<typeof issueSchema>;
 
 export function CertificatesPage() {
   usePageHeader({
@@ -40,15 +30,10 @@ export function CertificatesPage() {
     queryFn: () => api.get<Certificate[]>("/certificates/revoked"),
   });
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<IssueForm>({
-    resolver: zodResolver(issueSchema),
-  });
-
   const issue = useMutation({
-    mutationFn: (data: IssueForm) => api.post("/certificates", data),
+    mutationFn: (data: IssueCertificateRequest) => api.post("/certificates", data),
     onSuccess: () => {
       toast.success("Certificado emitido.");
-      reset();
       queryClient.invalidateQueries({ queryKey: ["certificates"] });
       queryClient.invalidateQueries({ queryKey: ["certificates", "revoked"] });
     },
@@ -86,19 +71,13 @@ export function CertificatesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Emitir certificado</CardTitle>
-          <CardDescription>Emite um novo certificado assinado pela CA local para o domínio/IP informado.</CardDescription>
+          <CardDescription>
+            Emite um novo certificado assinado pela CA local para um ou mais domínios/IPs (inclusive curinga), com o
+            período de validade escolhido.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="flex items-end gap-2" onSubmit={handleSubmit((data) => issue.mutate(data))}>
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="domain">Domínio ou IP</Label>
-              <Input id="domain" placeholder="ex.: painel.local" {...register("domain")} />
-              {errors.domain && <p className="text-sm text-destructive">{errors.domain.message}</p>}
-            </div>
-            <Button type="submit" disabled={issue.isPending}>
-              Emitir
-            </Button>
-          </form>
+          <IssueCertificateForm pending={issue.isPending} onSubmit={(request) => issue.mutate(request)} />
         </CardContent>
       </Card>
 

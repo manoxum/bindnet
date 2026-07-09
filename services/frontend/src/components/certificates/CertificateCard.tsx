@@ -1,7 +1,7 @@
 import { Download, ShieldCheck, ShieldX, Trash2 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { Certificate } from "@/components/certificates/certificate-types";
+import { allCertificateDomains, type Certificate } from "@/components/certificates/certificate-types";
 import type { CertificateListProps } from "@/components/certificates/CertificateTable";
 
 interface CertificateCardProps {
@@ -21,6 +21,7 @@ function CertificateCard({
   onRevoke,
   onPermanentDelete,
 }: CertificateCardProps) {
+  const extraDomains = allCertificateDomains(certificate).filter((name) => name !== certificate.domain);
   return (
     <div className="rounded-lg border bg-card p-4 text-card-foreground shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
@@ -36,6 +37,11 @@ function CertificateCard({
         </div>
         <Badge variant={revoked ? "secondary" : "success"}>{revoked ? "revogado" : "válido"}</Badge>
       </div>
+      {extraDomains.length > 0 && (
+        <p className="mt-2 truncate text-xs text-muted-foreground" title={extraDomains.join(", ")}>
+          + {extraDomains.join(", ")}
+        </p>
+      )}
       <p className="mt-3 text-xs text-muted-foreground">
         {revoked ? "Revogado em" : "Expira em"}{" "}
         {new Date(revoked ? certificate.revokedAt! : certificate.expiresAt).toLocaleDateString()}
