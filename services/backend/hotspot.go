@@ -172,10 +172,7 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 		_ = json.NewEncoder(w).Encode(clients)
 	}))
 
-	mux.HandleFunc("GET /api/hotspot/logs", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_ = worker.streamLogs(r.Context(), w, "hotspot", r.URL.Query().Get("follow") == "true")
-	}))
+	registerHotspotLogsRoutes(mux, worker, admin, audit, db)
 }
 
 func applyHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerClient) error {

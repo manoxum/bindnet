@@ -136,6 +136,70 @@ Regras:
   usa contra a saída de `iw phy info` (`{` sem bound válido) e sempre
   falha, fazendo o hotspot concluir erroneamente, em qualquer
   adaptador, que o modo concorrente não é suportado.
+- **Wi-Fi para Wi-Fi com `WIFI_CHANNEL=auto`** (`WIFI_INTERFACE` ==
+  `INTERNET_INTERFACE`, ver `attempt_hotspot_cycle`/`try_create_ap` em
+  `entrypoint.sh`): se a placa já está associada como cliente Wi-Fi no
+  momento da tentativa, o hotspot **pula a varredura/ranking de canais
+  candidatos inteira** (`rank_channels_for_band`, que faz `iw dev ...
+  scan`) e trava direto no canal/banda que a associação já está usando
+  (`sta_current_band_channel`) — o próprio `create_ap` sobrescreveria
+  banda/canal pra bater com a estação de qualquer forma, então escanear
+  antes só arrisca derrubar essa mesma conexão cliente (que alimenta o
+  hotspot) sem nenhum ganho. Se a placa **não** está associada como
+  cliente nesse momento e `WIFI_INTERFACE` é igual a
+  `INTERNET_INTERFACE`, o hotspot **falha explicitamente** (retentável,
+  mesmo loop de backoff usado para qualquer outra queda) em vez de
+  aceitar `--no-virt` como sucesso: sem uma interface virtual `ap0`
+  preservando a associação, a mesma placa não pode ser AP puro e
+  estação ao mesmo tempo, e um AP sem nenhuma internet por trás
+  apareceria como "rodando" no painel enganosamente. Essa checagem não
+  se aplica quando `WIFI_INTERFACE` ≠ `INTERNET_INTERFACE` (ex.:
+  hotspot pela Wi-Fi com internet vindo de uma interface cabeada) —
+  `--no-virt` nesse caso é comportamento correto e esperado.
+  **`sta_link_connected`** (`channel.sh`), usada por essa checagem em
+  `try_create_ap` e por `sta_current_band_channel` (o "trava direto no
+  canal" acima também depende dela), tolera blips momentâneos de
+  associação: até `STA_LINK_CHECK_ATTEMPTS` leituras de `iw dev ...
+  link` (padrão 20, a cada `STA_LINK_CHECK_INTERVAL_SECONDS`, padrão
+  0.4s — env do container, sem equivalente no painel, mesmo padrão de
+  `HOTSPOT_BEACON_FAILURE_THRESHOLD` em `watchdog.sh`) antes de
+  considerar "não associada" de verdade — confirmado por polling
+  externo ao container que a associação pode piscar por vários
+  segundos (o único rádio físico saindo do canal pra uma varredura de
+  fundo que o próprio NetworkManager/`wpa_supplicant` dispara
+  periodicamente numa interface já associada, ex.: pra avaliar roaming
+  entre APs do mesmo SSID) sem representar uma queda real — o usuário
+  nunca percebe nada, só a leitura pontual de `iw dev link` fica
+  ambígua durante a janela. A paciência é alta de propósito: o custo
+  de esperar mais um pouco aqui é bem menor que cair pro loop de retry
+  externo (backoff de 3s/6s/9s.../`HOTSPOT_RESTART_BACKOFF_SECONDS`
+  por tentativa) só pra repetir a mesma checagem — sem isso, o hotspot
+  Wi-Fi-para-Wi-Fi podia demorar dezenas de segundos (ou falhar
+  repetidamente) mesmo com o cliente Wi-Fi genuinamente estável.
+  **Mesmo com essa paciência, se `sta_current_band_channel` ainda
+  assim falhar** (associação genuinamente instável por mais tempo que
+  isso), Wi-Fi para Wi-Fi **nunca** cai pro caminho antigo de
+  varredura ativa de canais (`start_hotspot_auto`/
+  `rank_channels_for_band`, que roda `iw dev ... scan`) — confirmado
+  ao vivo que esse scan ativo é bem mais perturbador pra uma estação
+  associada do que a varredura passiva de fundo do NetworkManager, e
+  cair nele só piorava a instabilidade da própria conexão cliente que
+  alimenta o hotspot, num círculo vicioso. Em vez disso, retorna falha
+  retentável direto e deixa o loop de retry externo (sem nenhum scan
+  no meio) esperar a estação estabilizar sozinha — não há perda
+  nenhuma, já que o canal do AP é sempre forçado pro canal da estação
+  neste modo de qualquer forma, nunca escolhido pelo ranking de
+  interferência. Pela mesma razão, `try_create_ap` também nunca sobe o
+  AP com banda/canal não confirmados contra a estação: se
+  `sta_current_band_channel` falhar bem no meio de `try_create_ap`
+  (STA associada segundos atrás, mas o canal não confirma agora), a
+  tentativa falha (retentável) em vez de seguir com os valores
+  originais (ex.: um candidato de banda/canal vindo de uma tentativa
+  anterior) — confirmado ao vivo que isso produz um `hostapd`
+  inconsistente (o `create_ap` força o canal certo nos bastidores, mas
+  a banda/capacidades declaradas ficam erradas) e clientes reais nunca
+  completam a autenticação ("did not acknowledge authentication
+  response"), mesmo com o AP aparecendo "ENABLED" no log.
 - O painel filtra do seletor de `INTERNET_INTERFACE` (e de
   `WIFI_INTERFACE`) qualquer interface virtual que nunca é uma saída de
   internet real (`docker*`, `br-*` gerada pelo Docker, `veth*`,
@@ -215,25 +279,51 @@ scripts tinham, só que dentro do container privilegiado em vez de
      cria os containers se ainda não existirem (1ª subida) e também os
      recria se o `.env` mudou, não apenas `docker start`, sem acionar o
      job `migration` nem o `docker-compose.yml` agregador.
-  2. O container `hotspot` deixa a `WIFI_INTERFACE` física sob controle
-     do NetworkManager e delega ao `create_ap` a criação da interface
-     AP virtual (`ap0`) quando o adaptador suporta AP+STA. A fonte de
-     internet entregue ao `create_ap` é sempre o uplink virtual
+  2. O `worker`, bem em cima do `docker exec ... start`
+     (`unmanageWifiInterfaceIfIdle`, `services/worker/controller/compose.go`),
+     desgerencia `WIFI_INTERFACE` no NetworkManager **exceto** quando
+     `WIFI_INTERFACE == INTERNET_INTERFACE` e a placa já está associada
+     como cliente Wi-Fi agora (Wi-Fi para Wi-Fi de verdade, AP+STA
+     concorrente) — só nesse caso ela fica gerenciada de propósito,
+     para preservar essa associação. Qualquer outra combinação (ex.:
+     internet via Ethernet) sempre desgerencia a placa antes do hotspot
+     subir, mesmo que ela esteja transitoriamente associada a alguma
+     rede Wi-Fi do usuário sem relação com o hotspot — deixar o
+     NetworkManager "dono" dela nesse caso o faz competir pelo rádio
+     com o `hostapd` (escaneando/tentando reassociar a mesma placa
+     enquanto o AP tenta usá-la), derrubando o beacon. O container
+     `hotspot` delega ao `create_ap` a criação da interface AP virtual
+     (`ap0`) quando o adaptador suporta AP+STA. A fonte de internet
+     entregue ao `create_ap` é sempre o uplink virtual
      `BINDNET_UPLINK_INTERFACE`, alimentado por regras Bindnet de
      NAT/forward a partir da interface real configurada.
 - `POST /api/hotspot/stop` desfaz exatamente o inverso, na ordem
   inversa:
-  1. Para `hotspot` + `dns-provider` (`docker stop`, via `worker`).
+  1. Para `hotspot` + `dns-provider` (`docker stop`, via `worker`) —
+     internamente, o comando `stop` do `entrypoint.sh` sempre passa
+     por `force_stop_create_ap` (mesma função usada por `cleanup()` na
+     saída normal do serviço), que aplica timeout + escalona pra
+     `SIGKILL` (o `create_ap`/`hostapd` diretos e, por varredura final,
+     qualquer processo órfão ainda referenciando o diretório de config
+     dessa interface) em vez de confiar só num `create_ap --stop`
+     "educado" — um `hostapd` preso no loop de falha de beacon (ver
+     `watchdog.sh`) ignora sinal de parada limpa e ficaria órfão
+     segurando a placa física indefinidamente, mesmo com o `stop`
+     reportando sucesso.
   2. Garante que qualquer drop-in antigo do NetworkManager seja removido
      e devolve `WIFI_INTERFACE` ao controle do NetworkManager
      (`worker`: `POST /network/wifi-manage`, que roda `nmcli device set
      ... managed yes`). O container também remove `bn-uplink` e as
      chains `BINDNET-HOTSPOT` ao sair.
 - `POST /api/hotspot/recover-wifi` é a ação operacional do botão
-  "Recuperar Wi-Fi" na tela "Hotspot Wi-Fi": repete a etapa segura de
-  parada e devolução da placa ao NetworkManager quando a interface ficou
-  presa como não gerenciada após queda/restart/interrupção fora do fluxo
-  normal.
+  "Recuperar Wi-Fi" na tela "Hotspot Wi-Fi": derruba/para o hotspot em
+  execução (mesmo caminho de `POST /api/hotspot/stop`, incluindo o
+  `force_stop_create_ap` acima — garante que nenhum `hostapd`/`create_ap`
+  fica órfão segurando a placa) e em seguida recupera o controle da
+  interface via `wifi-manage`, devolvendo-a ao NetworkManager. É a ação
+  segura para destravar a placa quando ela ficou presa como não
+  gerenciada (ou com um hotspot zumbi ainda vivo) após queda/restart/
+  interrupção fora do fluxo normal.
 - `WIFI_INTERFACE` vem da seção `hotspot` do `.env` (via `worker`); se
   não estiver definida, a requisição falha explicitamente (sem
   fallback silencioso para uma interface adivinhada).

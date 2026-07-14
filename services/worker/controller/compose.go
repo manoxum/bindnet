@@ -47,7 +47,7 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 			// as duas discordarem - foi exatamente essa janela que expos
 			// o bug do NetworkManager brigando pela placa com o hostapd
 			// (ver unmanageWifiInterface em network.go).
-			unmanageWifiInterfaceIfIdle(config["WIFI_INTERFACE"])
+			unmanageWifiInterfaceIfIdle(config["WIFI_INTERFACE"], config["INTERNET_INTERFACE"])
 		}
 
 		output, err := execHotspotEntrypoint(action)
@@ -61,18 +61,29 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 }
 
 // unmanageWifiInterfaceIfIdle desgerencia a placa Wi-Fi fisica no
-// NetworkManager antes do hotspot subir, mas so quando ela NAO esta
-// associada como cliente agora - mesmo criterio que try_create_ap
+// NetworkManager antes do hotspot subir. So preserva uma associacao
+// Wi-Fi cliente existente (nao desgerencia) quando WIFI_INTERFACE e
+// INTERNET_INTERFACE sao a MESMA placa (Wi-Fi para Wi-Fi de verdade,
+// AP+STA concorrente) - mesmo criterio que try_create_ap
 // (entrypoint.sh) usa para escolher --no-virt em vez de criar uma
-// interface AP virtual. Quando ha associacao ativa (AP+STA), a placa
-// fica gerenciada de proposito, para preservar o Wi-Fi cliente do
-// usuario. Falha/ausencia de iface nunca bloqueia o start.
-func unmanageWifiInterfaceIfIdle(iface string) {
-	if iface == "" || interfaceAssociated(iface) {
+// interface AP virtual. Qualquer outra combinacao (ex.: internet via
+// Ethernet) nao tem motivo pra preservar essa associacao, mesmo que a
+// placa esteja transitoriamente conectada a alguma rede Wi-Fi do
+// usuario sem relacao com o hotspot: deixa-la gerenciada nesse caso
+// so faz o NetworkManager continuar escaneando/tentando (re)associar
+// essa mesma placa enquanto o hostapd tenta manter o AP nela,
+// derrubando o beacon ("Failed to set beacon parameters"/"key not
+// allowed", ver Dockerfile). Falha/ausencia de iface nunca bloqueia o
+// start.
+func unmanageWifiInterfaceIfIdle(wifiInterface, internetInterface string) {
+	if wifiInterface == "" {
 		return
 	}
-	if err := unmanageWifiInterface(iface); err != nil {
-		log.Printf("[worker] aviso: falha ao desgerenciar %s no NetworkManager: %v", iface, err)
+	if wifiInterface == internetInterface && interfaceAssociated(wifiInterface) {
+		return
+	}
+	if err := unmanageWifiInterface(wifiInterface); err != nil {
+		log.Printf("[worker] aviso: falha ao desgerenciar %s no NetworkManager: %v", wifiInterface, err)
 	}
 }
 

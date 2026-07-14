@@ -45,7 +45,23 @@ start_beacon_failure_watcher() {
           count=$((count + 1))
           if (( count >= HOTSPOT_BEACON_FAILURE_THRESHOLD )); then
             log "AVISO: falha recorrente de beacon detectada (${count}x em ${HOTSPOT_BEACON_FAILURE_WINDOW_SECONDS}s; regressao do hostapd 2.11 ou rfkill externo na placa fisica, ver Dockerfile/watchdog.sh); derrubando o create_ap para nova tentativa."
-            kill -INT "${target_pid}" >/dev/null 2>&1 || true
+            # Um "kill -INT" sozinho pode nunca matar de verdade: com o
+            # beacon ja quebrado, o hostapd as vezes fica preso
+            # (netlink/driver travado) e ignora o sinal - sem forcar a
+            # saida aqui, "wait $CREATE_AP_PID" em try_create_ap trava
+            # pra sempre, o loop de retry no fim do entrypoint.sh nunca
+            # roda de novo e nem a reconciliacao do backend percebe
+            # queda nenhuma (create_ap --list-running continua
+            # reportando a instancia presa como "rodando" normalmente).
+            # "timeout -k", igual ja usado em cleanup() pro mesmo tipo
+            # de trava, tenta a parada limpa via create_ap --stop
+            # primeiro (sabe localizar/derrubar o hostapd+dnsmasq
+            # certos) e forca SIGKILL se nem isso sair a tempo; o
+            # "kill -KILL" direto no PID logo depois garante que o PID
+            # que "wait" esta esperando morre de qualquer jeito, mesmo
+            # se create_ap --stop tiver resolvido outro PID.
+            timeout -k 5 10 create_ap --stop "${WIFI_INTERFACE}" >/dev/null 2>&1 || true
+            kill -KILL "${target_pid}" >/dev/null 2>&1 || true
             exit 0
           fi
           ;;

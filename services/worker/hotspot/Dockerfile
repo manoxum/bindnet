@@ -29,13 +29,24 @@ RUN apk add --no-cache \
 # repo). ATENCAO: essa mesma assinatura de log ("Failed to set beacon
 # parameters" + "nl80211: kernel reports: key not allowed" + interface
 # disabled/enabled em loop, ver watchdog.sh) tambem reproduz com o
-# hostapd 2.10 pinado aqui - ja confirmado cruzando o log do container
-# com "iwlwifi ...: RF_KILL bit toggled" no kernel e o audit
-# "radio-control" do NetworkManager no mesmo timestamp: o gatilho real
-# observado foi um rfkill de verdade na placa fisica em uso pelo
-# hotspot (--no-virt), porque o NetworkManager continuava "dono" dela -
-# ver unmanagePhysicalInterfaceIfIdle em
-# services/backend/hotspot_network.go.
+# hostapd 2.10 pinado aqui - confirmado cruzando o log do container com
+# os logs do NetworkManager (journalctl -u NetworkManager) no mesmo
+# timestamp: o gatilho real e o NetworkManager continuando "dono"
+# (sys-iface-state: managed) da placa fisica em uso pelo hotspot
+# (--no-virt) e tentando escanear/reassociar essa mesma placa as redes
+# Wi-Fi salvas do usuario ENQUANTO o hostapd tenta manter o AP nela -
+# a disputa pelo radio derruba o beacon. Causa raiz: unmanageWifiInterfaceIfIdle
+# (services/worker/controller/compose.go) so desgerenciava a placa
+# quando ela estava OCIOSA no momento da checagem - se o usuario tinha
+# qualquer rede Wi-Fi (sem relacao nenhuma com o hotspot, ex.: internet
+# via Ethernet) associada a essa placa nesse instante, a funcao
+# preservava essa associacao "pra nao derrubar o Wi-Fi cliente do
+# usuario", mesmo quando INTERNET_INTERFACE nao era essa mesma placa e
+# portanto nao havia motivo nenhum pra preservar nada. Corrigido: agora
+# so preserva a associacao quando WIFI_INTERFACE == INTERNET_INTERFACE
+# de verdade (Wi-Fi para Wi-Fi, AP+STA concorrente na mesma placa) -
+# qualquer outra combinacao sempre desgerencia a placa antes do hotspot
+# subir, independente do que ela estiver associada no momento.
 # O pin da 2.10 continua valendo a pena (evita a regressao de MLO em
 # si), mas nao assuma que ele sozinho elimina essa cascata de beacon -
 # watchdog.sh continua sendo a rede de seguranca de qualquer forma.

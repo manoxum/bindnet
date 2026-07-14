@@ -116,6 +116,13 @@ func handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 		tail = "200"
 	}
 	args := composeArgs("logs", "--tail", tail)
+	if since := r.URL.Query().Get("since"); since != "" {
+		// --since filtra por timestamp (RFC3339) - usado pelo "Limpar
+		// logs" do painel (ver hotspot_logs.go em services/backend), sem
+		// efeito quando ausente (comportamento igual ao de antes para
+		// dns-provider e outros chamadores deste endpoint).
+		args = append(args, "--since", since)
+	}
 	if r.URL.Query().Get("follow") == "true" {
 		args = append(args, "-f")
 	}

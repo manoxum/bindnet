@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Ban, History, ScrollText, Sliders, Ticket, UserCog, Wifi } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { HotspotConfigForm } from "@/components/hotspot/HotspotConfigForm";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { HotspotDialogs } from "@/components/hotspot/HotspotDialogs";
+import { HotspotTabsList } from "@/components/hotspot/HotspotTabsList";
 import { HotspotBlocklistCard } from "@/components/hotspot/HotspotBlocklistCard";
 import { HotspotClientsCard } from "@/components/hotspot/HotspotClientsCard";
 import { HotspotKnownDevicesCard } from "@/components/hotspot/HotspotKnownDevicesCard";
@@ -27,7 +25,7 @@ export function HotspotPage() {
   const autoPromptedRef = useRef(false);
 
   const { status, config, interfaces, clients, blocklist, knownDevices } = useHotspotQueries();
-  const { saveAndApply, start, stop, recoverWifi, block, unblock } = useHotspotMutations({
+  const { saveAndApply, start, stop, recoverWifi, block, unblock, clearLogs } = useHotspotMutations({
     onSaveSuccess: () => setConfigOpen(false),
     onRecoverSuccess: () => setConfirmRecoverOpen(false),
   });
@@ -105,42 +103,7 @@ export function HotspotPage() {
       />
 
       <Tabs defaultValue="connected" className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-7 sm:inline-grid sm:w-auto">
-          <TabsTrigger value="connected" className="gap-2">
-            <Wifi className="h-4 w-4" />
-            Conectados
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
-              {connectedCount}
-            </span>
-          </TabsTrigger>
-          <TabsTrigger value="blocked" className="gap-2">
-            <Ban className="h-4 w-4" />
-            Bloqueados
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
-              {blockedCount}
-            </span>
-          </TabsTrigger>
-          <TabsTrigger value="known" className="gap-2">
-            <History className="h-4 w-4" />
-            Todos os dispositivos
-          </TabsTrigger>
-          <TabsTrigger value="limits">
-            <Sliders className="h-4 w-4" />
-            Limites
-          </TabsTrigger>
-          <TabsTrigger value="profiles">
-            <UserCog className="h-4 w-4" />
-            Perfis
-          </TabsTrigger>
-          <TabsTrigger value="vouchers">
-            <Ticket className="h-4 w-4" />
-            Vouchers
-          </TabsTrigger>
-          <TabsTrigger value="logs">
-            <ScrollText className="h-4 w-4" />
-            Logs
-          </TabsTrigger>
-        </TabsList>
+        <HotspotTabsList connectedCount={connectedCount} blockedCount={blockedCount} />
 
         <TabsContent value="connected" className="mt-0">
           <HotspotClientsCard
@@ -185,42 +148,27 @@ export function HotspotPage() {
         </TabsContent>
 
         <TabsContent value="logs" className="mt-0">
-          <LogsPanel title="Logs do hotspot" path="/hotspot/logs" />
+          <LogsPanel title="Logs do hotspot" path="/hotspot/logs" onClear={() => clearLogs.mutateAsync()} />
         </TabsContent>
       </Tabs>
 
-      <Dialog open={configOpen} onOpenChange={setConfigOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Configuração do hotspot</DialogTitle>
-            <DialogDescription>
-              Salvar já recria o hotspot na hora para assumir os novos valores.
-            </DialogDescription>
-          </DialogHeader>
-          <HotspotConfigForm
-            register={register}
-            errors={errors}
-            handleSubmit={handleSubmit}
-            onSave={(data) => saveAndApply.mutate(data)}
-            isDirty={isDirty}
-            savePending={saveAndApply.isPending}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword((v) => !v)}
-            wifiInterfaces={wifiInterfaces}
-            networkInterfaces={networkInterfaces}
-          />
-        </DialogContent>
-      </Dialog>
-
-      <ConfirmDialog
-        open={confirmRecoverOpen}
-        onOpenChange={setConfirmRecoverOpen}
-        title="Recuperar adaptador Wi-Fi"
-        description="O hotspot está ligado e vai ser parado agora para recuperar o adaptador. Continuar?"
-        confirmLabel="Recuperar"
-        variant="destructive"
-        pending={recoverWifi.isPending}
-        onConfirm={() => recoverWifi.mutate()}
+      <HotspotDialogs
+        configOpen={configOpen}
+        onConfigOpenChange={setConfigOpen}
+        register={register}
+        errors={errors}
+        handleSubmit={handleSubmit}
+        onSave={(data) => saveAndApply.mutate(data)}
+        isDirty={isDirty}
+        savePending={saveAndApply.isPending}
+        showPassword={showPassword}
+        onToggleShowPassword={() => setShowPassword((v) => !v)}
+        wifiInterfaces={wifiInterfaces}
+        networkInterfaces={networkInterfaces}
+        confirmRecoverOpen={confirmRecoverOpen}
+        onConfirmRecoverOpenChange={setConfirmRecoverOpen}
+        recoverPending={recoverWifi.isPending}
+        onConfirmRecover={() => recoverWifi.mutate()}
       />
     </div>
   );

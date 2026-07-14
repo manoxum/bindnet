@@ -6,6 +6,7 @@
   :root {
     /* esmeralda + grafite: identidade de marca em vez do slate monocromático padrão do shadcn */
     /* light: fundo acinzentado (não branco puro) para reduzir cansaço visual; cards brancos por cima para contraste */
+    color-scheme: light;
     --background: 220 14% 93%;
     --foreground: 222 20% 12%;
     --card: 210 18% 97%;
@@ -28,6 +29,11 @@
 
   .dark {
     /* dark: tom azulado (dark blue) em vez de grafite neutro */
+    /* diz ao navegador pra desenhar widgets nativos (popup do <select>,
+       scrollbar, etc.) no tema escuro - sem isso o popup do select-native.tsx
+       sai com fundo claro do SO enquanto o texto herda a cor clara do tema,
+       texto claro sobre fundo claro (ilegível) */
+    color-scheme: dark;
     --background: 224 40% 8%;
     --foreground: 210 30% 96%;
     --card: 223 34% 12%;

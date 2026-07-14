@@ -12,9 +12,12 @@ function wifiQrValue(ssid: string, password: string) {
   return `WIFI:T:WPA;S:${escape(ssid)};P:${escape(password)};;`;
 }
 
-// Cartão do QR de conexão Wi-Fi: moldura em degradê na cor da marca em volta
-// de um miolo branco (o branco é o que garante boa leitura pela câmera em
-// qualquer tema, então nunca deve seguir o fundo escuro do dark mode).
+// Cartão do QR de conexão Wi-Fi: moldura e textos seguem o tema (dark:),
+// mas o miolo do QR em si (fundo + modulos) fica sempre fixo em
+// preto-sobre-branco, nunca invertido pro dark mode - QR com modulos
+// claros sobre fundo escuro falha na leitura de muitos scanners de
+// camera (contraste insuficiente pro algoritmo deles), entao aqui vale
+// mais leitura confiavel do que consistencia visual com o tema.
 // Clicável: gira em 3D (CSS "flip card", sem lib extra) revelando o SSID e
 // a senha em texto puro no verso - útil quando a câmera não está à mão
 // (ex.: digitar a senha manualmente em outro aparelho).
@@ -60,23 +63,23 @@ export function HotspotWifiQr({ ssid, password }: HotspotWifiQrProps) {
         </div>
 
         <div
-          className="absolute inset-0 flex h-full min-w-[190px] flex-col items-center justify-center gap-4 rounded-[calc(1rem-1px)] bg-white px-6 py-5"
+          className="absolute inset-0 flex h-full min-w-[190px] flex-col items-center justify-center gap-4 rounded-[calc(1rem-1px)] bg-white px-6 py-5 dark:bg-slate-900"
           style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
         >
-          <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-emerald-600 shadow-sm">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-emerald-600 shadow-sm dark:border-slate-900">
             <Wifi className="h-5 w-5 text-white" />
           </div>
           <div className="flex w-full flex-col items-center gap-1">
-            <span className="text-[10px] uppercase tracking-wide text-emerald-700/60">Rede</span>
-            <p className="max-w-full truncate text-sm font-semibold text-emerald-900">{ssid}</p>
+            <span className="text-[10px] uppercase tracking-wide text-emerald-700/60 dark:text-emerald-300/60">Rede</span>
+            <p className="max-w-full truncate text-sm font-semibold text-emerald-900 dark:text-emerald-100">{ssid}</p>
           </div>
           <div className="flex w-full flex-col items-center gap-1">
-            <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-emerald-700/60">
+            <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-emerald-700/60 dark:text-emerald-300/60">
               <KeyRound className="h-3 w-3" /> Senha
             </span>
-            <p className="max-w-full truncate font-mono text-sm font-semibold text-emerald-900">{password}</p>
+            <p className="max-w-full truncate font-mono text-sm font-semibold text-emerald-900 dark:text-emerald-100">{password}</p>
           </div>
-          <p className="flex items-center gap-1 text-[10px] text-emerald-700/60">
+          <p className="flex items-center gap-1 text-[10px] text-emerald-700/60 dark:text-emerald-300/60">
             <Eye className="h-3 w-3" /> toque para ver o QR
           </p>
         </div>

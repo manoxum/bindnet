@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -84,12 +85,19 @@ func (c *workerClient) callText(ctx context.Context, path string, dest *strings.
 
 // streamLogs repassa ao ResponseWriter o stream de logs que o worker
 // devolve, em tempo real (usado pelos paineis de log do frontend).
-func (c *workerClient) streamLogs(ctx context.Context, w http.ResponseWriter, container string, follow bool) error {
-	url := fmt.Sprintf("http://worker/containers/%s/logs?tail=200", container)
+// since, quando nao vazio, e um timestamp RFC3339: o worker repassa
+// como "--since" para o "docker compose logs", devolvendo so logs a
+// partir dali (usado pelo "Limpar logs" do hotspot, ver
+// hotspot_logs.go).
+func (c *workerClient) streamLogs(ctx context.Context, w http.ResponseWriter, container string, follow bool, since string) error {
+	endpoint := fmt.Sprintf("http://worker/containers/%s/logs?tail=200", container)
 	if follow {
-		url += "&follow=true"
+		endpoint += "&follow=true"
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if since != "" {
+		endpoint += "&since=" + url.QueryEscape(since)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
 	}

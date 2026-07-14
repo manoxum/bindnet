@@ -106,7 +106,7 @@ func registerDNSRoutes(mux *http.ServeMux, worker *workerClient, admin *administ
 
 	mux.HandleFunc("GET /api/dns/logs", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_ = worker.streamLogs(r.Context(), w, "dns-provider", r.URL.Query().Get("follow") == "true")
+		_ = worker.streamLogs(r.Context(), w, "dns-provider", r.URL.Query().Get("follow") == "true", "")
 	}))
 
 	mux.HandleFunc("GET /api/dns/discovered-servers", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {

@@ -122,16 +122,46 @@ runtime_pid() {
   return 1
 }
 
+# force_stop_create_ap encerra de vez a instancia do create_ap numa
+# interface, com timeout e escalonamento pra SIGKILL - usada tanto por
+# stop_running_create_ap_instances (comando "stop", chamado pelo
+# painel via POST /api/hotspot/stop e /api/hotspot/recover-wifi)
+# quanto por cleanup() (saida normal do "run", mais abaixo). "create_ap
+# --stop" sozinho pode nunca terminar: se o hostapd estiver preso
+# (netlink/driver ja quebrado - mesma trava documentada em
+# watchdog.sh), ele ignora o sinal de parada limpa e "create_ap --stop"
+# fica esperando pra sempre, travando tambem quem o chamou (inclusive
+# a propria requisicao HTTP do painel). Sem forcar a saida aqui, o
+# hostapd/dnsmasq ficam orfaos segurando a interface fisica mesmo
+# depois do "stop"/"recover-wifi" reportarem sucesso - devolver a
+# placa pro NetworkManager em seguida (wifi-manage) so faria o
+# NetworkManager brigar com um hostapd zumbi ainda vivo pela mesma
+# placa. "pid" e opcional (pode nao ser conhecido pelo chamador); o
+# pkill final varre por qualquer hostapd/dnsmasq que ainda referencie o
+# diretorio de config dessa interface, cobrindo tambem processos ja
+# orfaos/reparentados.
+force_stop_create_ap() {
+  local iface="$1"
+  local pid="${2:-}"
+  timeout -k 5 10 create_ap --stop "${iface}" >/dev/null 2>&1 || true
+  if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
+    kill -KILL "${pid}" >/dev/null 2>&1 || true
+  fi
+  pkill -KILL -f "create_ap[.]${iface}[.]conf" >/dev/null 2>&1 || true
+}
+
 stop_running_create_ap_instances() {
   local line
+  local pid
   local iface
   if [[ -n "${WIFI_INTERFACE:-}" ]]; then
-    create_ap --stop "${WIFI_INTERFACE}" >/dev/null 2>&1 || true
+    force_stop_create_ap "${WIFI_INTERFACE}"
   fi
   while read -r line; do
+    pid="$(awk '{print $1}' <<< "${line}")"
     iface="$(awk '{print $2}' <<< "${line}")"
     [[ -n "${iface}" ]] || continue
-    create_ap --stop "${iface}" >/dev/null 2>&1 || true
+    force_stop_create_ap "${iface}" "${pid}"
   done < <(create_ap --list-running 2>/dev/null || true)
 }
 
@@ -378,7 +408,7 @@ try_create_ap() {
   # EBUSY quando o create_ap tenta trocar o MAC duplicado dessa interface.
   # Com a placa desconectada, usar diretamente a interface fisica evita essa
   # operacao sem perder funcionalidade; o uplink continua sendo bn-uplink.
-  if iw dev "${WIFI_INTERFACE}" link 2>/dev/null | grep -q '^Connected to '; then
+  if sta_link_connected; then
     log "Wi-Fi cliente ativo em ${WIFI_INTERFACE}; preservando-o com uma interface AP virtual."
     # Um unico radio so transmite numa frequencia por vez: se
     # WIFI_INTERFACE (AP) e INTERNET_INTERFACE (STA) sao a mesma placa,
@@ -397,7 +427,17 @@ try_create_ap() {
         channel="${sta_channel}"
       fi
     else
-      log "AVISO: nao foi possivel ler o canal atual da associacao Wi-Fi cliente de ${WIFI_INTERFACE}; seguindo com banda ${band}GHz/canal ${channel} sem travar no canal da estacao."
+      # Nunca sobe o AP com banda/canal nao confirmados contra a
+      # estacao: um radio unico so transmite numa frequencia por vez,
+      # entao banda/canal errados aqui (ex.: vindos de um candidato de
+      # rank_channels_for_band) produzem um hostapd inconsistente com
+      # a associacao real - confirmado ao vivo (create_ap forca o
+      # canal certo nos bastidores, mas a banda/capacidades do hostapd
+      # ficam erradas) resultando em clientes reais que nunca
+      # completam a autenticacao ("did not acknowledge authentication
+      # response"), mesmo com o AP aparecendo "ENABLED" no log.
+      log "ERRO: nao foi possivel confirmar o canal atual da associacao Wi-Fi cliente de ${WIFI_INTERFACE} mesmo apos aguardar - subir o AP em ${band}GHz/canal ${channel} sem confirmar contra a estacao arrisca um hostapd com banda/canal incompativeis (clientes reais nao completam a autenticacao). Aguardando e tentando de novo."
+      return 1
     fi
     # O canal acima ja e, por definicao, um canal que o firmware aceitou
     # transmitir para a associacao STA em curso - inclusive quando o phy
@@ -413,6 +453,17 @@ try_create_ap() {
       country="${self_managed_country}"
     fi
   else
+    # Wi-Fi para Wi-Fi (WIFI_INTERFACE == INTERNET_INTERFACE) sem
+    # associacao agora: --no-virt sobe o AP usando a placa inteira,
+    # sem nenhuma conexao cliente sobrando - o hotspot ficaria
+    # "rodando" pro painel, mas sem internet nenhuma pra compartilhar,
+    # ja que a mesma placa nao pode ser AP puro e estacao ao mesmo
+    # tempo. Falha aqui (retentavel, ver loop de retry no fim do
+    # script) em vez de aceitar um AP sem internet como sucesso.
+    if [[ "${WIFI_INTERFACE}" == "${REAL_INTERNET_INTERFACE}" ]]; then
+      log "ERRO: ${WIFI_INTERFACE} e INTERNET_INTERFACE sao a mesma placa (Wi-Fi para Wi-Fi), mas ela nao esta associada como cliente Wi-Fi agora - subir em --no-virt deixaria o hotspot 'rodando' sem internet nenhuma pra compartilhar. Aguardando a placa reconectar como cliente antes de tentar de novo."
+      return 1
+    fi
     virtual_interface_args=(--no-virt)
     log "${WIFI_INTERFACE} sem associacao Wi-Fi cliente; usando a interface fisica diretamente em modo AP (--no-virt)."
   fi
@@ -525,21 +576,16 @@ LAST_GOOD_CHANNEL=""
 cleanup() {
   log "Encerrando hotspot em ${WIFI_INTERFACE}."
   stop_beacon_failure_watcher
-  # timeout -k: "create_ap --stop" roda uma instancia nova do proprio
-  # script create_ap so pra localizar e sinalizar a instancia ativa. Se
-  # a instancia original estiver presa num loop de erro do driver
-  # (ex.: a regressao de beacon do hostapd, ver watchdog.sh), essa
-  # segunda instancia pode nao encontrar um estado consistente e
-  # travar - sem limite de tempo aqui, o cleanup inteiro (e portanto a
-  # saida do script e a deteccao da queda pelo backend) ficaria preso
-  # indefinidamente. "-k 5" forca SIGKILL 5s depois do SIGTERM inicial
-  # se ainda nao tiver saido.
-  timeout -k 5 10 create_ap --stop "${WIFI_INTERFACE}" >/dev/null 2>&1 || true
-  # Reforco: "create_ap --stop" ja resolve e sinaliza o PID certo
-  # sozinho, mas se por algum motivo ele nao encontrar a instancia,
-  # sinaliza direto o PID que guardamos - create_ap trata SIGINT como
-  # pedido de parada limpa (clean_exit), igual --stop.
-  [[ -n "${CREATE_AP_PID}" ]] && kill -INT "${CREATE_AP_PID}" >/dev/null 2>&1 || true
+  # force_stop_create_ap (definida no topo do script, perto de
+  # stop_running_create_ap_instances) ja cobre o timeout de
+  # "create_ap --stop" e o escalonamento pra SIGKILL - reusa aqui em
+  # vez de duplicar essa logica. Garante que hostapd/dnsmasq realmente
+  # morrem antes de devolver a placa pro NetworkManager (ver
+  # recoverWifiAdapter em services/backend/hotspot_network.go): sem
+  # isso, uma instancia presa (netlink/driver ja quebrado, ver
+  # watchdog.sh) ficaria orfa segurando a interface fisica mesmo depois
+  # do cleanup reportar concluido.
+  force_stop_create_ap "${WIFI_INTERFACE}" "${CREATE_AP_PID}"
   cleanup_bindnet_uplink
 }
 trap cleanup EXIT
@@ -612,6 +658,43 @@ attempt_hotspot_cycle() {
     fi
     status=0
     try_create_ap "${WIFI_FREQ_BAND}" "${WIFI_CHANNEL}" || status=$?
+    return "${status}"
+  fi
+
+  # Wi-Fi para Wi-Fi (WIFI_INTERFACE == INTERNET_INTERFACE) com
+  # WIFI_CHANNEL=auto: se a placa ja esta associada como cliente agora,
+  # trava direto no canal/banda dessa associacao e pula a varredura de
+  # candidatos inteira. try_create_ap ja sobrescreve banda/canal pra
+  # bater com a estacao de qualquer forma (ver comentario ali) - rankear/
+  # escanear canais (rank_channels_for_band, via start_hotspot_auto)
+  # so arrisca derrubar essa mesma conexao Wi-Fi cliente (que alimenta o
+  # hotspot) com "iw dev ... scan" antes da primeira tentativa real, sem
+  # nenhum ganho, ja que o resultado do ranking seria descartado mesmo.
+  # Wi-Fi para Wi-Fi NUNCA cai pro caminho de varredura ativa abaixo
+  # (start_hotspot_auto/rank_channels_for_band): "iw dev ... scan"
+  # ativo e bem mais perturbador pra estacao associada do que a
+  # varredura passiva de fundo do NetworkManager (confirmado - foi
+  # exatamente essa varredura ativa, disparada apos sta_current_band_channel
+  # falhar aqui uma vez, que manteve a placa instavel nas tentativas
+  # seguintes) - sem ganho nenhum de qualquer forma, ja que o canal do
+  # AP e sempre forcado pro canal da estacao neste modo (try_create_ap
+  # sobrescreve), nunca escolhido pelo ranking de interferencia. Se
+  # sta_current_band_channel falhar mesmo com toda a paciencia de
+  # sta_link_connected, retorna falha retentavel e deixa o loop de
+  # retry externo (backoff mais longo, sem nenhum scan no meio)
+  # esperar a estacao estabilizar sozinha.
+  if [[ "${WIFI_INTERFACE}" == "${REAL_INTERNET_INTERFACE}" ]]; then
+    local sta_band_channel
+    if sta_band_channel="$(sta_current_band_channel)"; then
+      local sta_band="${sta_band_channel% *}"
+      local sta_channel="${sta_band_channel#* }"
+      log "Wi-Fi para Wi-Fi: ${WIFI_INTERFACE} ja associado em ${sta_band}GHz canal ${sta_channel}; travando nesse canal direto, sem varredura, pra nao arriscar derrubar a propria conexao cliente."
+      status=0
+      try_create_ap "${sta_band}" "${sta_channel}" || status=$?
+    else
+      log "ERRO: nao foi possivel confirmar o canal atual da associacao Wi-Fi cliente de ${WIFI_INTERFACE} mesmo apos aguardar - Wi-Fi para Wi-Fi nao varre canais nessa placa (a varredura ativa so pioraria a instabilidade da propria conexao cliente). Aguardando reconectar antes de tentar de novo."
+      status=1
+    fi
     return "${status}"
   fi
 

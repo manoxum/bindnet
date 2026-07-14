@@ -83,7 +83,16 @@ export function useHotspotMutations({ onSaveSuccess, onRecoverSuccess }: UseHots
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao desbloquear cliente"),
   });
 
-  return { saveAndApply, start, stop, recoverWifi, block, unblock };
+  // Nao apaga o log nativo do Docker (nao ha como, ver
+  // services/backend/hotspot_logs.go) - so grava o corte de tempo a
+  // partir do qual GET /api/hotspot/logs volta a mostrar linhas.
+  const clearLogs = useMutation({
+    mutationFn: () => api.post<void>("/hotspot/logs/clear"),
+    onSuccess: () => toast.success("Logs limpos."),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao limpar logs"),
+  });
+
+  return { saveAndApply, start, stop, recoverWifi, block, unblock, clearLogs };
 }
 
 // useIdentifyDevice e useUpdateDeviceIdentity são independentes de

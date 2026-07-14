@@ -5,13 +5,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 interface LogsPanelProps {
   title: string;
   path: string;
+  // onClear e opcional - so a tela de hotspot (ate agora) grava um
+  // corte de tempo no backend (POST /api/hotspot/logs/clear) para
+  // "esquecer" os logs antigos; quando ausente, o botao "Limpar
+  // logs" nem aparece (ex.: tela de DNS).
+  onClear?: () => Promise<void> | void;
 }
 
 // LogsPanel le o stream de texto puro que o backend repassa do worker
 // (docker logs -f) e vai anexando ao painel, com auto-scroll.
-export function LogsPanel({ title, path }: LogsPanelProps) {
+export function LogsPanel({ title, path, onClear }: LogsPanelProps) {
   const [lines, setLines] = useState("");
   const [following, setFollowing] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  // Incrementado a cada "Limpar logs" bem sucedido so para forcar o
+  // efeito abaixo a reabrir o stream (se estiver acompanhando) ja a
+  // partir do novo corte de tempo gravado no backend.
+  const [resetToken, setResetToken] = useState(0);
   const preRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
@@ -35,19 +45,40 @@ export function LogsPanel({ title, path }: LogsPanelProps) {
       });
 
     return () => controller.abort();
-  }, [following, path]);
+  }, [following, path, resetToken]);
 
   useEffect(() => {
     preRef.current?.scrollTo({ top: preRef.current.scrollHeight });
   }, [lines]);
 
+  const handleClear = async () => {
+    if (!onClear) return;
+    setClearing(true);
+    try {
+      await onClear();
+      setLines("");
+      setResetToken((v) => v + 1);
+    } catch {
+      // erro ja mostrado via toast por quem passou onClear
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base">{title}</CardTitle>
-        <Button size="sm" variant={following ? "destructive" : "outline"} onClick={() => setFollowing((v) => !v)}>
-          {following ? "Parar" : "Acompanhar logs"}
-        </Button>
+        <div className="flex items-center gap-2">
+          {onClear && (
+            <Button size="sm" variant="outline" onClick={handleClear} disabled={clearing}>
+              Limpar logs
+            </Button>
+          )}
+          <Button size="sm" variant={following ? "destructive" : "outline"} onClick={() => setFollowing((v) => !v)}>
+            {following ? "Parar" : "Acompanhar logs"}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         <pre ref={preRef} className="h-64 overflow-auto rounded-md bg-black p-3 text-xs text-green-400">

@@ -6,7 +6,8 @@ import { useApexChartColors } from "@/components/hotspot/apex-chart-theme";
 import { pickByteScale, toBitsPerSecond } from "@/components/hotspot/hotspot-limits-types";
 import { useGlobalSpeedHistory, useGlobalStats } from "@/components/hotspot/useHotspotQueries";
 
-const WINDOW_MINUTES = 5;
+const TREND_WINDOW_MINUTES = 5;
+const GAUGE_MAX_WINDOW_MINUTES = 1;
 
 // Painel geral (todo o trafego do hotspot, nao um dispositivo) do card
 // "Configuracao atual" - velocimetros "agora" e tendencia (5 min) num
@@ -26,6 +27,13 @@ export function HotspotGlobalSpeedPanel() {
   const hasTrend = samples.length >= 2;
   const maxAbs = Math.max(...samples.flatMap((sample) => [sample.downloadBps, sample.uploadBps]), 1);
   const { divisor, label } = pickByteScale(maxAbs, "bit");
+
+  // Teto dos velocimetros "geral": 2x a media dos ultimos 5 min (mesma
+  // janela do grafico de tendencia), recalculado a cada atualizacao do
+  // historico - nao um valor fixo. Sem amostras ainda, cai no autoescala
+  // do SpeedGauge (maxBps undefined).
+  const avgDownloadBps = samples.length > 0 ? samples.reduce((sum, s) => sum + s.downloadBps, 0) / samples.length : undefined;
+  const avgUploadBps = samples.length > 0 ? samples.reduce((sum, s) => sum + s.uploadBps, 0) / samples.length : undefined;
 
   const series = useMemo(
     () => [
@@ -79,8 +87,18 @@ export function HotspotGlobalSpeedPanel() {
   return (
     <div className="flex w-full flex-1 flex-col items-center gap-4 rounded-xl border border-border/60 bg-muted/20 p-4 sm:flex-row sm:items-center">
       <div className="flex shrink-0 items-center justify-center gap-4">
-        <SpeedGauge valueBps={toBitsPerSecond(stats.data?.downloadBps ?? 0)} label="Download geral" size="lg" />
-        <SpeedGauge valueBps={toBitsPerSecond(stats.data?.uploadBps ?? 0)} label="Upload geral" size="lg" />
+        <SpeedGauge
+          valueBps={toBitsPerSecond(stats.data?.downloadBps ?? 0)}
+          maxBps={avgDownloadBps !== undefined ? toBitsPerSecond(avgDownloadBps) * 2 : undefined}
+          label="Download geral"
+          size="lg"
+        />
+        <SpeedGauge
+          valueBps={toBitsPerSecond(stats.data?.uploadBps ?? 0)}
+          maxBps={avgUploadBps !== undefined ? toBitsPerSecond(avgUploadBps) * 2 : undefined}
+          label="Upload geral"
+          size="lg"
+        />
       </div>
       <div className="hidden self-stretch border-l border-border/60 sm:block" />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
