@@ -20,7 +20,8 @@ const GAUGE_MAX_WINDOW_MINUTES = 1;
 // worker) em vez de por dispositivo.
 export function HotspotGlobalSpeedPanel() {
   const stats = useGlobalStats();
-  const history = useGlobalSpeedHistory(WINDOW_MINUTES);
+  const history = useGlobalSpeedHistory(TREND_WINDOW_MINUTES);
+  const gaugeMaxHistory = useGlobalSpeedHistory(GAUGE_MAX_WINDOW_MINUTES);
   const colors = useApexChartColors();
 
   const samples = history.data ?? [];
@@ -28,12 +29,16 @@ export function HotspotGlobalSpeedPanel() {
   const maxAbs = Math.max(...samples.flatMap((sample) => [sample.downloadBps, sample.uploadBps]), 1);
   const { divisor, label } = pickByteScale(maxAbs, "bit");
 
-  // Teto dos velocimetros "geral": 2x a media dos ultimos 5 min (mesma
-  // janela do grafico de tendencia), recalculado a cada atualizacao do
-  // historico - nao um valor fixo. Sem amostras ainda, cai no autoescala
-  // do SpeedGauge (maxBps undefined).
-  const avgDownloadBps = samples.length > 0 ? samples.reduce((sum, s) => sum + s.downloadBps, 0) / samples.length : undefined;
-  const avgUploadBps = samples.length > 0 ? samples.reduce((sum, s) => sum + s.uploadBps, 0) / samples.length : undefined;
+  // Teto dos velocimetros "geral": 2x a media do ultimo 1 min (janela
+  // menor que a do grafico de tendencia, pra reagir mais rapido a picos
+  // recentes), recalculado a cada atualizacao do historico - nao um
+  // valor fixo. Sem amostras ainda, cai no autoescala do SpeedGauge
+  // (maxBps undefined).
+  const gaugeMaxSamples = gaugeMaxHistory.data ?? [];
+  const avgDownloadBps =
+    gaugeMaxSamples.length > 0 ? gaugeMaxSamples.reduce((sum, s) => sum + s.downloadBps, 0) / gaugeMaxSamples.length : undefined;
+  const avgUploadBps =
+    gaugeMaxSamples.length > 0 ? gaugeMaxSamples.reduce((sum, s) => sum + s.uploadBps, 0) / gaugeMaxSamples.length : undefined;
 
   const series = useMemo(
     () => [
