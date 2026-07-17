@@ -14,16 +14,12 @@ import {
   quotaValueToBytes,
   type RateUnit,
 } from "@/components/hotspot/hotspot-limits-types";
+import { optionalPositiveInt } from "@/components/hotspot/hotspot-number-schema";
 import { RateUnitOptions } from "@/components/hotspot/RateUnitOptions";
 import { HotspotCreditConfigFields } from "@/components/hotspot/HotspotCreditConfigFields";
 import { EmptyState } from "@/components/bindnets/EmptyState";
 import { useDeviceCredit, useDeviceLimits } from "@/components/hotspot/useHotspotQueries";
 import { useDeviceCreditMutations, type DeviceCreditConfig } from "@/components/hotspot/useHotspotCreditMutations";
-
-const optionalPositiveInt = z
-  .string()
-  .trim()
-  .refine((value) => value === "" || (/^\d+$/.test(value) && Number(value) > 0), "Deve ser um número positivo");
 
 const creditConfigSchema = z.object({
   rechargeAmountGB: optionalPositiveInt,

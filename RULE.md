@@ -559,6 +559,16 @@ scripts tinham, só que dentro do container privilegiado em vez de
   ficarem ativos ao mesmo tempo no mesmo perfil/dispositivo (causa
   histórica de bloqueio por crédito disfarçado de "cota parou de
   contabilizar").
+- **Taxa e cota aceitam valor fracionário** na unidade escolhida (ex.:
+  cota diária de `1.5GB`, taxa de download de `17.5KB/s`), tanto em
+  perfil quanto em override de dispositivo. O formulário aceita `.` ou
+  `,` como separador decimal, já que a UI é em português (ver
+  `optionalPositiveDecimal` em `hotspot-number-schema.ts`). Cota sempre
+  coube no banco (é gravada em bytes, `BIGINT`); taxa era `INTEGER` e
+  passou a `double precision` na migration
+  `20260716000000_hotspot_rate_decimal` — a fração chega até o `tc`
+  como está (`rate 17.5kbps`, ver `rate()` em `shaping_tc.go`). A
+  política de crédito (recarga/plafond, em GB) **continua só inteira**.
 - **`limitType = "custom"` delega a decisão para o dispositivo**: um
   perfil "customizado" não aplica limite nenhum por si só — o
   dispositivo vinculado a ele é quem escolhe sua própria estratégia

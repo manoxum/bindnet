@@ -11,11 +11,13 @@ import { DeviceIdentifyModal } from "@/components/hotspot/DeviceIdentifyModal";
 import { WifiSignalIndicator } from "@/components/hotspot/WifiSignalIndicator";
 import type { HotspotBlockMode } from "@/components/hotspot/useHotspotMutations";
 
-// "manual" (bloqueio explicito do admin), "credit" (credito esgotado)
-// ou "quota" (cota de dados esgotada) - ver deviceBlockReason em
-// services/backend/hotspot_device_block_reason.go. "" ou ausente =
+// "manual" (bloqueio explicito do admin, modo "deauth" - desconectado
+// do Wi-Fi), "manual_traffic" (bloqueio explicito, modo "traffic" - so
+// trafego cortado, dispositivo continua associado), "credit" (credito
+// esgotado) ou "quota" (cota de dados esgotada) - ver deviceBlockReason
+// em services/backend/hotspot_device_block_reason.go. "" ou ausente =
 // nao bloqueado.
-export type HotspotBlockReason = "manual" | "credit" | "quota" | "";
+export type HotspotBlockReason = "manual" | "manual_traffic" | "credit" | "quota" | "";
 
 export interface HotspotClient {
   mac: string;
@@ -55,6 +57,8 @@ export function blockStatusLabel(
       return { label: "Sem crédito", variant: "destructive" };
     case "quota":
       return { label: "Cota esgotada", variant: "destructive" };
+    case "manual_traffic":
+      return { label: "Tráfego cortado", variant: "outline" };
     default:
       if (client.blocked) return { label: "Bloqueado", variant: "destructive" };
   }

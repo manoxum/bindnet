@@ -7,23 +7,35 @@ import "database/sql"
 // esgotado, cota esgotada) mas todas acabam chamando o mesmo primitivo
 // de bloqueio ao vivo (applyLiveTrafficBlock) - sem essa distincao aqui
 // a listagem so tinha um "blocked" generico, indistinguivel de um
-// bloqueio manual. Prioridade quando mais de uma fonte esta ativa ao
-// mesmo tempo: manual > credit > quota (a acao explicita do admin e a
-// mais "intencional" das tres, prevalece na exibicao).
+// bloqueio manual. O bloqueio manual em si tem 2 variantes (ver "mode"
+// em hotspot_blocklist.go): "deauth" derruba do Wi-Fi
+// (blockReasonManual) e "traffic" so corta o trafego, dispositivo
+// continua associado (blockReasonManualTraffic) - sem distinguir aqui
+// as duas apareciam como o mesmo "Bloqueado" pro admin, mesmo o
+// dispositivo continuando conectado no modo "traffic". Prioridade
+// quando mais de uma fonte esta ativa ao mesmo tempo: manual > credit >
+// quota (a acao explicita do admin e a mais "intencional" das tres,
+// prevalece na exibicao).
 type blockReason = string
 
 const (
-	blockReasonNone   blockReason = ""
-	blockReasonManual blockReason = "manual"
-	blockReasonCredit blockReason = "credit"
-	blockReasonQuota  blockReason = "quota"
+	blockReasonNone          blockReason = ""
+	blockReasonManual        blockReason = "manual"
+	blockReasonManualTraffic blockReason = "manual_traffic"
+	blockReasonCredit        blockReason = "credit"
+	blockReasonQuota         blockReason = "quota"
 )
 
-// deviceBlockReason resolve a fonte de bloqueio de um MAC entre as 3
+// deviceBlockReason resolve a fonte de bloqueio de um MAC entre as
 // possiveis, com prioridade manual > credit > quota quando mais de uma
 // esta ativa ao mesmo tempo (ver comentario em blockReason acima).
-func deviceBlockReason(mac string, manual, credit, quota map[string]bool) blockReason {
-	if manual[mac] {
+// manualModes mapeia MAC -> "mode" do bloqueio manual (ver
+// hotspotBlockedSet).
+func deviceBlockReason(mac string, manualModes map[string]string, credit, quota map[string]bool) blockReason {
+	if mode, ok := manualModes[mac]; ok {
+		if mode == "traffic" {
+			return blockReasonManualTraffic
+		}
 		return blockReasonManual
 	}
 	if credit[mac] {

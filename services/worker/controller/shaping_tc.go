@@ -81,7 +81,7 @@ func deviceClassID(fwmark int) string {
 // ensureDeviceClass cria/atualiza a classe HTB dedicada de um
 // dispositivo (classid = fwmark, sempre dentro de 1:1) e o filtro que
 // classifica pacotes marcados com esse fwmark nela.
-func ensureDeviceClass(iface string, fwmark, rateValue int, rateUnitValue string) error {
+func ensureDeviceClass(iface string, fwmark int, rateValue float64, rateUnitValue string) error {
 	classID := deviceClassID(fwmark)
 	guaranteedValue, guaranteedUnit := guaranteedRate(rateValue, rateUnitValue)
 	if err := runTC("class", "replace", "dev", iface, "parent", "1:1", "classid", classID,
@@ -102,7 +102,7 @@ func ensureDeviceClass(iface string, fwmark, rateValue int, rateUnitValue string
 // casos (qualquer limite abaixo de 1 Mbit/s, ex.: os 25 kbyte/s de um
 // perfil "convidado") o piso garantido vira o proprio teto, sem
 // inflar a garantia acima do que o admin permitiu.
-func guaranteedRate(ceilValue int, ceilUnit string) (int, string) {
+func guaranteedRate(ceilValue float64, ceilUnit string) (float64, string) {
 	if bitsPerSecond(ceilValue, ceilUnit) < bitsPerSecond(minGuaranteedMbps, rateUnitMbit) {
 		return ceilValue, ceilUnit
 	}
@@ -114,21 +114,20 @@ func guaranteedRate(ceilValue int, ceilUnit string) (int, string) {
 // so serve pra comparar taxas de unidades diferentes, nunca e passado
 // direto pro tc (rate/tcRateSuffix continuam usando o valor+unidade
 // originais).
-func bitsPerSecond(value int, unit string) int64 {
-	v := int64(value)
+func bitsPerSecond(value float64, unit string) float64 {
 	switch unit {
 	case "kbit":
-		return v * 1_000
+		return value * 1_000
 	case "gbit":
-		return v * 1_000_000_000
+		return value * 1_000_000_000
 	case "kbyte":
-		return v * 1_000 * 8
+		return value * 1_000 * 8
 	case "mbyte":
-		return v * 1_000_000 * 8
+		return value * 1_000_000 * 8
 	case "gbyte":
-		return v * 1_000_000_000 * 8
+		return value * 1_000_000_000 * 8
 	default: // "mbit" e qualquer valor vazio/desconhecido (mesmo default de tcRateSuffix)
-		return v * 1_000_000
+		return value * 1_000_000
 	}
 }
 
@@ -172,10 +171,18 @@ func tcRateSuffix(unit string) string {
 	}
 }
 
-// rate monta o argumento de taxa do tc (ex.: "100mbit", "500kbps") a
-// partir do valor digitado pelo admin e da unidade escolhida na UI.
-func rate(value int, unit string) string {
-	return strconv.Itoa(value) + tcRateSuffix(unit)
+// rate monta o argumento de taxa do tc (ex.: "100mbit", "500kbps",
+// "17.5kbps") a partir do valor digitado pelo admin e da unidade
+// escolhida na UI - o valor pode ser fracionario, e o tc parseia
+// decimal no argumento de taxa (get_rate/strtod do iproute2).
+//
+// FormatFloat com 'f' (nunca 'g'/%v) porque so o formato decimal puro e
+// aceito pelo tc: 'g' vira notacao cientifica a partir de 1e21 ("1e+21"),
+// e o parser do tc pararia no "e". A precisao -1 usa o minimo de digitos
+// que reproduz o float exato, entao valor inteiro sai sem casa decimal
+// ("100mbit", nao "100.000000mbit").
+func rate(value float64, unit string) string {
+	return strconv.FormatFloat(value, 'f', -1, 64) + tcRateSuffix(unit)
 }
 
 func runTC(args ...string) error {

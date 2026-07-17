@@ -50,9 +50,12 @@ func isValidLimitType(t limitType, allowCustom bool) bool {
 // ate os 3 tetos de cota abaixo em simultaneo, cada um com seu proprio
 // acumulador em hotspot_device_quota_periods (quota).
 type hotspotLimits struct {
-	DownloadRateValue *int     `json:"downloadRateValue"`
+	// Taxa aceita valor fracionario (1.5MB/s, 17.5KB/s), por isso
+	// *float64 e nao *int - a coluna e double precision desde a
+	// migration 20260716000000_hotspot_rate_decimal. nil = sem limite.
+	DownloadRateValue *float64 `json:"downloadRateValue"`
 	DownloadRateUnit  rateUnit `json:"downloadRateUnit"`
-	UploadRateValue   *int     `json:"uploadRateValue"`
+	UploadRateValue   *float64 `json:"uploadRateValue"`
 	UploadRateUnit    rateUnit `json:"uploadRateUnit"`
 
 	LimitType         limitType `json:"limitType"`

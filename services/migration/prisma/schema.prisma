@@ -258,9 +258,12 @@ model HotspotGlobalLimits {
 // usava esse shape foi removido, ver HotspotGlobalLimits acima).
 model HotspotDeviceLimits {
   macAddress                 String   @id @map("mac_address")
-  downloadRateValue          Int?     @map("download_rate_value")
+  // Float (double precision) e nao Int: a taxa aceita valor
+  // fracionario (1.5MB/s, 17.5KB/s) - ver migration
+  // 20260716000000_hotspot_rate_decimal.
+  downloadRateValue          Float?   @map("download_rate_value")
   downloadRateUnit           String   @default("mbit") @map("download_rate_unit")
-  uploadRateValue            Int?     @map("upload_rate_value")
+  uploadRateValue            Float?   @map("upload_rate_value")
   uploadRateUnit             String   @default("mbit") @map("upload_rate_unit")
   quotaBytes                 BigInt?  @map("quota_bytes")
   quotaPeriod                String?  @map("quota_period")
@@ -419,9 +422,12 @@ model HotspotProfile {
   name      String  @unique
   isDefault Boolean @default(false) @map("is_default")
 
-  downloadRateValue          Int?     @map("download_rate_value")
+  // Float (double precision) e nao Int: a taxa aceita valor
+  // fracionario (1.5MB/s, 17.5KB/s) - ver migration
+  // 20260716000000_hotspot_rate_decimal.
+  downloadRateValue          Float?   @map("download_rate_value")
   downloadRateUnit           String   @default("mbit") @map("download_rate_unit")
-  uploadRateValue            Int?     @map("upload_rate_value")
+  uploadRateValue            Float?   @map("upload_rate_value")
   uploadRateUnit             String   @default("mbit") @map("upload_rate_unit")
   quotaBytes                 BigInt?  @map("quota_bytes")
   quotaPeriod                String?  @map("quota_period")

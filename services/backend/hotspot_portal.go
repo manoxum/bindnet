@@ -135,7 +135,7 @@ func portalMeResponse(ctx context.Context, db *sql.DB, worker *workerClient, mac
 	response := hotspotPortalMeResponse{
 		MAC:             mac,
 		ProfileName:     profile.Name,
-		Blocked:         blocked[mac],
+		Blocked:         blocked[mac] != "",
 		LimitType:       limits.LimitType,
 		BlockedByCredit: credit.BlockedByCredit,
 		BalanceBytes:    credit.BalanceBytes,

@@ -4,6 +4,7 @@ import type { ApexOptions } from "apexcharts";
 import { SpeedGauge } from "@/components/ui/speed-gauge";
 import { useApexChartColors } from "@/components/hotspot/apex-chart-theme";
 import { pickByteScale, smoothSpeedSamples, toBitsPerSecond } from "@/components/hotspot/hotspot-limits-types";
+import { speedAreaChartOptions } from "@/components/hotspot/speed-area-chart-options";
 import { useGlobalSpeedHistory, useGlobalStats } from "@/components/hotspot/useHotspotQueries";
 
 const TREND_WINDOW_MINUTES = 5;
@@ -50,43 +51,7 @@ export function HotspotGlobalSpeedPanel() {
   );
 
   const options: ApexOptions = useMemo(
-    () => ({
-      chart: {
-        type: "area",
-        toolbar: { show: false },
-        zoom: { enabled: false },
-        animations: { enabled: false },
-        fontFamily: "inherit",
-        foreColor: colors.mutedForeground,
-        sparkline: { enabled: false },
-      },
-      colors: [colors.primary, colors.secondary],
-      stroke: { curve: "smooth", width: [2.5, 1.75] },
-      fill: {
-        type: "gradient",
-        gradient: { shadeIntensity: 1, opacityFrom: 0.35, opacityTo: 0, stops: [0, 90, 100] },
-      },
-      dataLabels: { enabled: false },
-      grid: { borderColor: colors.border, strokeDashArray: 3, padding: { left: 8, right: 8, top: -20 } },
-      xaxis: {
-        type: "datetime",
-        labels: { datetimeUTC: false, style: { colors: colors.mutedForeground, fontSize: "10px" } },
-        axisBorder: { show: false },
-        axisTicks: { show: false },
-      },
-      yaxis: {
-        labels: {
-          formatter: (value) => `${value.toFixed(value >= 10 ? 0 : 1)}${label}`,
-          style: { colors: colors.mutedForeground, fontSize: "10px" },
-        },
-      },
-      tooltip: {
-        theme: "dark",
-        x: { format: "HH:mm:ss" },
-        y: { formatter: (value) => `${value.toFixed(2)}${label}/s` },
-      },
-      legend: { show: false },
-    }),
+    () => speedAreaChartOptions(colors, label, { left: 8, right: 8, top: -20 }),
     [colors, label],
   );
 

@@ -87,20 +87,25 @@ func registerHotspotBlocklistRoutes(mux *http.ServeMux, admin *administrator, db
 	}))
 }
 
-func hotspotBlockedSet(db *sql.DB) (map[string]bool, error) {
-	rows, err := db.Query(`SELECT mac_address FROM hotspot_blocked_devices`)
+// hotspotBlockedSet devolve o conjunto de MACs bloqueados manualmente
+// pelo admin, mapeado para o "mode" do bloqueio ("deauth" ou
+// "traffic") - usado por deviceBlockReason para distinguir bloqueio
+// completo (desconectado do Wi-Fi) de corte so de trafego (dispositivo
+// continua associado).
+func hotspotBlockedSet(db *sql.DB) (map[string]string, error) {
+	rows, err := db.Query(`SELECT mac_address, mode FROM hotspot_blocked_devices`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	blocked := map[string]bool{}
+	blocked := map[string]string{}
 	for rows.Next() {
-		var mac string
-		if err := rows.Scan(&mac); err != nil {
+		var mac, mode string
+		if err := rows.Scan(&mac, &mode); err != nil {
 			return nil, err
 		}
-		blocked[mac] = true
+		blocked[mac] = mode
 	}
 	return blocked, rows.Err()
 }

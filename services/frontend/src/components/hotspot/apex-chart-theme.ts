@@ -33,6 +33,12 @@ const PALETTE = {
   },
 } as const;
 
+// Paleta ja resolvida de UM tema - o que useApexChartColors devolve.
+// Existe como tipo nomeado pra quem monta opcoes de grafico fora de um
+// componente (ver speed-area-chart-options.ts) poder receber as cores
+// como parametro.
+export type ApexChartColors = (typeof PALETTE)[keyof typeof PALETTE];
+
 // useApexChartColors devolve a paleta resolvida pro tema ativo agora -
 // reativo (o componente que chamar isso re-renderiza sozinho quando o
 // usuario alterna claro/escuro, via useTheme/ThemeContext).

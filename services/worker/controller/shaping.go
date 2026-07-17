@@ -31,11 +31,14 @@ type shapingDeviceRequest struct {
 	Interface         string `json:"interface"`
 	MAC               string `json:"mac"`
 	IP                string `json:"ip"`
-	Fwmark            int    `json:"fwmark"`
-	DownloadRateValue *int   `json:"downloadRateValue"`
-	DownloadRateUnit  string `json:"downloadRateUnit"`
-	UploadRateValue   *int   `json:"uploadRateValue"`
-	UploadRateUnit    string `json:"uploadRateUnit"`
+	Fwmark int `json:"fwmark"`
+	// Taxa aceita valor fracionario (1.5MB/s, 17.5KB/s), por isso
+	// *float64 e nao *int - o tc parseia decimal no argumento de taxa
+	// (ver rate() em shaping_tc.go). nil = sem limite.
+	DownloadRateValue *float64 `json:"downloadRateValue"`
+	DownloadRateUnit  string   `json:"downloadRateUnit"`
+	UploadRateValue   *float64 `json:"uploadRateValue"`
+	UploadRateUnit    string   `json:"uploadRateUnit"`
 }
 
 type shapingStatsResponse struct {

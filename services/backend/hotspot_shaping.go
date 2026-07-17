@@ -46,7 +46,7 @@ func liveHotspotClientIP(ctx context.Context, worker *workerClient, iface, mac s
 // Postgres ate o tc no worker sem normalizar pra uma unidade comum -
 // Value nil = sem limite (Unit e ignorada nesse caso).
 type rateLimit struct {
-	Value *int     `json:"value"`
+	Value *float64 `json:"value"`
 	Unit  rateUnit `json:"unit"`
 }
 
@@ -71,9 +71,9 @@ type shapingDevicePayload struct {
 	MAC               string   `json:"mac"`
 	IP                string   `json:"ip"`
 	Fwmark            int      `json:"fwmark"`
-	DownloadRateValue *int     `json:"downloadRateValue"`
+	DownloadRateValue *float64 `json:"downloadRateValue"`
 	DownloadRateUnit  rateUnit `json:"downloadRateUnit"`
-	UploadRateValue   *int     `json:"uploadRateValue"`
+	UploadRateValue   *float64 `json:"uploadRateValue"`
 	UploadRateUnit    rateUnit `json:"uploadRateUnit"`
 }
 

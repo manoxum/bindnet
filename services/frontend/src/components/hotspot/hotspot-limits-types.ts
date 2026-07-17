@@ -134,8 +134,13 @@ export function bytesToQuotaValue(bytes: number, unit: RateUnit): number {
 // Formata um total de dados na unidade original em que foi informado
 // (ex.: valor de voucher emitido em MB continua exibido em MB, em vez
 // de sempre converter para GB) - ver hotspot-voucher-*.
+//
+// Sem toFixed(0): cota aceita fracao (1.5GB), e arredondar aqui fazia o
+// resumo do perfil anunciar "2GB" pra um teto que na verdade e 1.5GB.
+// Number() tira o zero a direita de quem e inteiro ("3GB", nao "3.00GB").
 export function formatQuotaValue(bytes: number, unit: RateUnit): string {
-  return `${bytesToQuotaValue(bytes, unit).toFixed(0)}${RATE_UNIT_LABELS[unit]}`;
+  const value = bytesToQuotaValue(bytes, unit);
+  return `${Number(value.toFixed(2))}${RATE_UNIT_LABELS[unit]}`;
 }
 
 // Natureza da grandeza (bit ou byte) - diferente de RateUnit, que
@@ -198,6 +203,20 @@ export function pickByteScale(maxAbsBytes: number, nature: ByteNature = "byte"):
     index += 1;
   }
   return { divisor, label: labels[index] };
+}
+
+// formatScaledValue formata um valor que JA foi dividido pelo divisor
+// de pickByteScale (ou seja, ja esta na unidade "label" do eixo) com
+// casas decimais suficientes pra ele nao virar outro numero no texto.
+// Existe porque o arredondamento fixo antigo dos eixos ("0 casas quando
+// >= 10, 1 casa abaixo disso") fazia a escala vertical nao acompanhar a
+// curva desenhada: numa serie pequena varios ticks vizinhos viravam o
+// mesmo rotulo ("0.0", "0.0", "0.1") e num tick grande a fracao sumia
+// (12.5 virava "12"). Zeros a direita ficam de fora ("1.50" -> "1.5").
+export function formatScaledValue(value: number, label: string): string {
+  const abs = Math.abs(value);
+  const decimals = abs >= 100 ? 0 : abs >= 10 ? 1 : abs >= 1 ? 2 : 3;
+  return `${Number(value.toFixed(decimals))}${label}`;
 }
 
 // formatSpeedNow formata bytes/s num texto curto ("12.3Mbps"/"850KB/s")

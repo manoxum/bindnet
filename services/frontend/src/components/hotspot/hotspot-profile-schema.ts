@@ -1,12 +1,8 @@
 import { z } from "zod";
 import { hotspotLimitsFormSchema, limitsToFormValues, formValuesToLimits } from "@/components/hotspot/hotspot-device-limits-schema";
 import { GIGABYTE, bytesToGB } from "@/components/hotspot/hotspot-limits-types";
+import { optionalPositiveInt } from "@/components/hotspot/hotspot-number-schema";
 import type { HotspotProfile, HotspotProfileRequest } from "@/components/hotspot/hotspot-profile-types";
-
-const optionalPositiveInt = z
-  .string()
-  .trim()
-  .refine((value) => value === "" || (/^\d+$/.test(value) && Number(value) > 0), "Deve ser um número positivo");
 
 // Estende o mesmo schema de taxa/tipo/cota do limite de dispositivo
 // (hotspot-device-limits-schema.ts) com nome + politica de recarga de
