@@ -20,7 +20,6 @@ import (
 	"bindnet/dns-provider/internal/core"
 	"bindnet/dns-provider/internal/discover"
 	"bindnet/dns-provider/internal/dnsserver"
-	"bindnet/dns-provider/internal/l7filter"
 	"bindnet/dns-provider/internal/netdetect"
 	"bindnet/dns-provider/internal/nginx"
 	"bindnet/dns-provider/internal/store"
@@ -163,13 +162,6 @@ func main() {
 	// Blocked so age quando o IP de origem tem plano vinculado.
 	blocks := blocklist.NewStore()
 	go blocks.StartPoll(db, 10*time.Second)
-
-	// Filtro de conteudo L7 (complementar ao DNS): o worker redireciona
-	// 443/80 dos clientes com plano para estas portas locais; o proxy le
-	// SNI/Host e bloqueia/encaminha pela MESMA blocklist. Pega quem burla
-	// o DNS (troca de resolver, acesso por IP direto).
-	l7filter.StartSNIProxy("0.0.0.0:"+config.Getenv("L7_SNI_PORT", "8443"), blocks)
-	l7filter.StartHTTPProxy("0.0.0.0:"+config.Getenv("L7_HTTP_PORT", "8082"), blocks)
 
 	go discover.StartServer(cfg, discoverPort)
 	go discover.PollPeers(cfg)

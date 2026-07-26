@@ -86,8 +86,6 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 	// Reforco de DNS (forcar :53 + DoH/DoT) - ligado so quando ha plano
 	// de conteudo em uso; idempotente no worker.
 	applyDNSForceLive(ctx, db, worker)
-	// Filtro L7 (REDIRECT 443/80 -> proxy transparente de SNI/Host).
-	applyL7FilterLive(ctx, db, worker)
 	if err := applyAutomaticRecharges(db); err != nil {
 		log.Printf("[backend] recarga automatica de credito falhou: %v", err)
 	}

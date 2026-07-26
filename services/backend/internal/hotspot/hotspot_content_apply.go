@@ -23,7 +23,6 @@ func applyContentLive(ctx context.Context, db *sql.DB, worker *workerapi.Client)
 	}
 	applyFirewallLive(ctx, db, worker)
 	applyDNSForceLive(ctx, db, worker)
-	applyL7FilterLive(ctx, db, worker)
 }
 
 // publishContentBindings monta o mapa IP->plano dos clientes conectados
