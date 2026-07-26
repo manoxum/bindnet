@@ -50,6 +50,12 @@ start_beacon_failure_watcher() {
           if [[ "${ap_enabled_recorded}" -eq 0 ]]; then
             ap_enabled_recorded=1
             record_channel_result "${band}" "${channel}" 1
+            # Com o AP no ar, o create_ap ja injetou suas regras ACCEPT
+            # largas no FORWARD (acima do jump BINDNET-HOTSPOT); remove-as
+            # agora para BINDNET-HOTSPOT voltar a ser o unico gate - sem
+            # isso o bloqueio por credito/manual e furado no upload (ver
+            # neutralize_create_ap_forward em uplink.sh).
+            neutralize_create_ap_forward
           fi
           ;;
         *"Failed to set beacon parameters"*)

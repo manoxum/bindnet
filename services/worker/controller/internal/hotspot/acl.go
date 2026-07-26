@@ -86,19 +86,30 @@ func applyHostapdMACAction(iface, mac string, block bool) error {
 	return nil
 }
 
+// hotspotControlDir resolve o diretorio de controle do hostapd VIVO. Um
+// container que ja reiniciou o create_ap varias vezes acumula dezenas de
+// diretorios "/tmp/create_ap.<iface>.conf.*" orfaos (o create_ap so
+// remove o seu numa saida limpa; morto por SIGKILL/watchdog, o
+// diretorio fica). Pegar o primeiro match da glob quase sempre resolvia
+// um socket MORTO - o deny_acl/deauthenticate ia parar num hostapd que
+// nao existe mais e o bloqueio nunca chegava ao AP real. Por isso cada
+// candidato so e aceito depois de responder "PONG" a um "hostapd_cli
+// ping": so o socket da instancia viva passa.
 func hotspotControlDir(containerID, iface, realIface string) (string, error) {
 	output, err := exec.Command("docker", "exec", containerID, "sh", "-c", `
 set -eu
 for path in "/tmp/create_ap.$1.conf."*/hostapd_ctrl/"$2" /tmp/create_ap.*.conf.*/hostapd_ctrl/"$2"; do
-  if [ -e "$path" ]; then
-    dirname "$path"
+  [ -e "$path" ] || continue
+  dir="$(dirname "$path")"
+  if hostapd_cli -p "$dir" -i "$2" ping 2>/dev/null | grep -q PONG; then
+    printf '%s\n' "$dir"
     exit 0
   fi
 done
 exit 1
 `, "sh", iface, realIface).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("diretorio de controle do hostapd nao encontrado para %s: %s", realIface, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("socket de controle do hostapd vivo nao encontrado para %s (nenhum candidato respondeu ping): %s", realIface, strings.TrimSpace(string(output)))
 	}
 	ctrlDir := strings.TrimSpace(string(output))
 	if ctrlDir == "" {

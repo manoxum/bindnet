@@ -22,6 +22,7 @@ const profileColumns = `
 	limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
 	monthly_quota_bytes, monthly_quota_unit,
 	credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes,
+	time_mode, time_recharge_seconds, time_recharge_period, time_plafond_seconds, time_deadline_at,
 	allow_internal_communication
 `
 
@@ -32,6 +33,7 @@ func scanProfile(row interface{ Scan(...any) error }) (Profile, error) {
 		&p.LimitType, &p.DailyQuotaBytes, &p.DailyQuotaUnit, &p.WeeklyQuotaBytes, &p.WeeklyQuotaUnit,
 		&p.MonthlyQuotaBytes, &p.MonthlyQuotaUnit,
 		&p.CreditRechargeAmountBytes, &p.CreditRechargePeriod, &p.CreditPlafondBytes,
+		&p.TimeMode, &p.TimeRechargeSeconds, &p.TimeRechargePeriod, &p.TimePlafondSeconds, &p.TimeDeadlineAt,
 		&p.AllowInternalCommunication)
 	if err != nil {
 		return Profile{}, err
@@ -77,14 +79,16 @@ func InsertProfile(db *sql.DB, req ProfileRequest) (Profile, error) {
 			limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
 			monthly_quota_bytes, monthly_quota_unit,
 			credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes,
+			time_mode, time_recharge_seconds, time_recharge_period, time_plafond_seconds, time_deadline_at,
 			allow_internal_communication
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		RETURNING `+profileColumns,
 		req.Name, req.DownloadRateValue, req.DownloadRateUnit, req.UploadRateValue, req.UploadRateUnit,
 		req.LimitType, req.DailyQuotaBytes, req.DailyQuotaUnit, req.WeeklyQuotaBytes, req.WeeklyQuotaUnit,
 		req.MonthlyQuotaBytes, req.MonthlyQuotaUnit,
 		req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
+		req.TimeMode, req.TimeRechargeSeconds, req.TimeRechargePeriod, req.TimePlafondSeconds, req.TimeDeadlineAt,
 		req.AllowInternalCommunication,
 	))
 	if isUniqueViolation(err) {
@@ -101,7 +105,8 @@ func UpdateProfile(db *sql.DB, id string, req ProfileRequest) (Profile, bool, er
 		    limit_type = $7, daily_quota_bytes = $8, daily_quota_unit = $9, weekly_quota_bytes = $10, weekly_quota_unit = $11,
 		    monthly_quota_bytes = $12, monthly_quota_unit = $13,
 		    credit_recharge_amount_bytes = $14, credit_recharge_period = $15, credit_plafond_bytes = $16,
-		    allow_internal_communication = $17,
+		    time_mode = $17, time_recharge_seconds = $18, time_recharge_period = $19, time_plafond_seconds = $20, time_deadline_at = $21,
+		    allow_internal_communication = $22,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1
 		RETURNING `+profileColumns,
@@ -109,6 +114,7 @@ func UpdateProfile(db *sql.DB, id string, req ProfileRequest) (Profile, bool, er
 		req.LimitType, req.DailyQuotaBytes, req.DailyQuotaUnit, req.WeeklyQuotaBytes, req.WeeklyQuotaUnit,
 		req.MonthlyQuotaBytes, req.MonthlyQuotaUnit,
 		req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
+		req.TimeMode, req.TimeRechargeSeconds, req.TimeRechargePeriod, req.TimePlafondSeconds, req.TimeDeadlineAt,
 		req.AllowInternalCommunication,
 	))
 	if isUniqueViolation(err) {

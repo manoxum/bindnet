@@ -10,6 +10,7 @@ import { HotspotKnownDevicesCard } from "@/components/hotspot/HotspotKnownDevice
 import { HotspotSummaryCard } from "@/components/hotspot/HotspotSummaryCard";
 import { interfaceLabel } from "@/components/hotspot/HotspotInterfacesTab";
 import { HotspotIsolationCard } from "@/components/hotspot/HotspotIsolationCard";
+import { HotspotContentCard } from "@/components/hotspot/HotspotContentCard";
 import { HotspotProfilesCard } from "@/components/hotspot/HotspotProfilesCard";
 import { HotspotVouchersCard } from "@/components/hotspot/HotspotVouchersCard";
 import { configSchema, type ConfigForm } from "@/components/hotspot/hotspot-schema";
@@ -164,6 +165,10 @@ export function HotspotPage() {
 
         <TabsContent value="isolation" className="mt-0">
           <HotspotIsolationCard knownDevices={knownDevices.data ?? []} />
+        </TabsContent>
+
+        <TabsContent value="content" className="mt-0">
+          <HotspotContentCard />
         </TabsContent>
 
         <TabsContent value="vouchers" className="mt-0">

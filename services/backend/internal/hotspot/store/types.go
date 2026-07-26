@@ -32,14 +32,31 @@ const (
 	LimitTypeCredit    LimitType = "credit"
 	LimitTypeQuota     LimitType = "quota"
 	LimitTypeCustom    LimitType = "custom"
+	// LimitTypeTime limita por tempo (ver hotspot_reconcile_time.go):
+	// modo budget = saldo de segundos de conexao (gasto enquanto
+	// associado), modo deadline = acesso ate um instante. Valido em
+	// dispositivo e perfil, igual credit/quota.
+	LimitTypeTime LimitType = "time"
 )
+
+// TimeMode e o modo da limitacao por tempo (LimitTypeTime).
+type TimeMode = string
+
+const (
+	TimeModeBudget   TimeMode = "budget"
+	TimeModeDeadline TimeMode = "deadline"
+)
+
+func IsValidTimeMode(m TimeMode) bool {
+	return m == TimeModeBudget || m == TimeModeDeadline
+}
 
 // IsValidLimitType valida um LimitType vindo da API - allowCustom=true so
 // para rotas de perfil (POST/PATCH /api/hotspot/profiles), nunca para
 // rotas de dispositivo.
 func IsValidLimitType(t LimitType, allowCustom bool) bool {
 	switch t {
-	case LimitTypeUnlimited, LimitTypeCredit, LimitTypeQuota:
+	case LimitTypeUnlimited, LimitTypeCredit, LimitTypeQuota, LimitTypeTime:
 		return true
 	case LimitTypeCustom:
 		return allowCustom
@@ -75,6 +92,18 @@ type Limits struct {
 // todo dispositivo sem vinculo explicito cai nele.
 const DefaultProfileID = "00000000-0000-0000-0000-000000000001"
 
+// TimePolicy e o subconjunto de politica do tipo 'time' que um perfil
+// carrega (espelha as colunas time_* / a politica de credito). Vive
+// embutido em Profile/ProfileRequest e e lido por
+// syncDeviceTimeFromProfile quando o device herda o tipo do perfil.
+type TimePolicy struct {
+	TimeMode            *TimeMode  `json:"timeMode"`
+	TimeRechargeSeconds *int64     `json:"timeRechargeSeconds"`
+	TimeRechargePeriod  *string    `json:"timeRechargePeriod"`
+	TimePlafondSeconds  *int64     `json:"timePlafondSeconds"`
+	TimeDeadlineAt      *time.Time `json:"timeDeadlineAt"`
+}
+
 type Profile struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -83,6 +112,7 @@ type Profile struct {
 	CreditRechargeAmountBytes *int64  `json:"creditRechargeAmountBytes"`
 	CreditRechargePeriod      *string `json:"creditRechargePeriod"`
 	CreditPlafondBytes        *int64  `json:"creditPlafondBytes"`
+	TimePolicy
 	// Com o isolamento de clientes ligado (chave CLIENT_ISOLATION em
 	// hotspot_config), decide se os clientes deste perfil comunicam
 	// entre si - ver hotspot_isolation_policy.go.
@@ -95,7 +125,8 @@ type ProfileRequest struct {
 	CreditRechargeAmountBytes  *int64  `json:"creditRechargeAmountBytes"`
 	CreditRechargePeriod       *string `json:"creditRechargePeriod"`
 	CreditPlafondBytes         *int64  `json:"creditPlafondBytes"`
-	AllowInternalCommunication bool    `json:"allowInternalCommunication"`
+	TimePolicy
+	AllowInternalCommunication bool `json:"allowInternalCommunication"`
 }
 
 type DeviceInfo struct {

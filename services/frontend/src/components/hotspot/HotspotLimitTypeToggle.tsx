@@ -1,4 +1,4 @@
-import { CreditCard, Gauge, Infinity as InfinityIcon, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { Clock, CreditCard, Gauge, Infinity as InfinityIcon, SlidersHorizontal, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LIMIT_TYPE_LABELS, type LimitType } from "@/components/hotspot/hotspot-limits-types";
 
@@ -7,6 +7,7 @@ const LIMIT_TYPE_ICONS: Record<LimitType, LucideIcon> = {
   credit: CreditCard,
   quota: Gauge,
   custom: SlidersHorizontal,
+  time: Clock,
 };
 
 const LIMIT_TYPE_DESCRIPTIONS: Record<LimitType, string> = {
@@ -14,10 +15,11 @@ const LIMIT_TYPE_DESCRIPTIONS: Record<LimitType, string> = {
   credit: "Precisa de saldo para navegar",
   quota: "Teto diário/semanal/mensal",
   custom: "Não aplica limite - o dispositivo define",
+  time: "Tempo de conexão ou prazo",
 };
 
-const DEVICE_LIMIT_TYPES: LimitType[] = ["unlimited", "credit", "quota"];
-const PROFILE_LIMIT_TYPES: LimitType[] = ["unlimited", "credit", "quota", "custom"];
+const DEVICE_LIMIT_TYPES: LimitType[] = ["unlimited", "credit", "quota", "time"];
+const PROFILE_LIMIT_TYPES: LimitType[] = ["unlimited", "credit", "quota", "time", "custom"];
 
 interface HotspotLimitTypeToggleProps {
   value: LimitType;

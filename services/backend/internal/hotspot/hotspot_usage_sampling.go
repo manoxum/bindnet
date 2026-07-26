@@ -122,5 +122,13 @@ func reconcileDeviceUsage(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 		return err
 	}
 
+	if limits.LimitType == store.LimitTypeTime {
+		if err := reconcileDeviceTime(ctx, db, worker, mac, ip); err != nil {
+			return err
+		}
+	} else if err := clearStaleDeviceTimeBlock(ctx, db, worker, mac, ip); err != nil {
+		return err
+	}
+
 	return reconcileDeviceCredit(ctx, db, worker, creditTrace, mac, ip, limits.LimitType, deltaDown+deltaUp)
 }

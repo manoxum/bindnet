@@ -29,14 +29,32 @@ export const RATE_UNIT_LABELS: Record<RateUnit, string> = {
 // (nunca "custom" ele mesmo). Componentes que renderizam o seletor pro
 // dispositivo devem omitir essa opcao (ver includeCustom em
 // HotspotLimitTypeToggle.tsx).
-export type LimitType = "unlimited" | "credit" | "quota" | "custom";
+export type LimitType = "unlimited" | "credit" | "quota" | "custom" | "time";
 
 export const LIMIT_TYPE_LABELS: Record<LimitType, string> = {
   unlimited: "Ilimitado",
   credit: "Crédito",
   quota: "Cota",
   custom: "Customizado",
+  time: "Tempo",
 };
+
+// Modo da limitacao por tempo (LimitType "time"): budget = saldo de
+// tempo de conexao gasto enquanto associado; deadline = acesso ate um
+// instante. Ver services/backend/internal/hotspot/hotspot_reconcile_time.go.
+export type TimeMode = "budget" | "deadline";
+
+// formatDurationSeconds mostra um total de segundos como "1h30m"/"45m"/
+// "30s" - usado no resumo do perfil e no card de tempo do dispositivo.
+export function formatDurationSeconds(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return m > 0 ? `${h}h${m}m` : `${h}h`;
+  if (m > 0) return s > 0 ? `${m}m${s}s` : `${m}m`;
+  return `${s}s`;
+}
 
 // HotspotLimits e o shape de limite de um dispositivo (override) ou
 // perfil - LimitType decide qual bloco esta em uso: nenhum (unlimited),

@@ -23,7 +23,7 @@ export const hotspotLimitsFormSchema = z.object({
   downloadRateUnit: rateUnit,
   uploadRateValue: optionalPositiveDecimal,
   uploadRateUnit: rateUnit,
-  limitType: z.enum(["unlimited", "credit", "quota", "custom"]),
+  limitType: z.enum(["unlimited", "credit", "quota", "custom", "time"]),
   dailyQuotaValue: optionalPositiveDecimal,
   dailyQuotaUnit: rateUnit,
   weeklyQuotaValue: optionalPositiveDecimal,

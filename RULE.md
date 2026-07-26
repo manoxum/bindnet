@@ -554,13 +554,40 @@ scripts tinham, só que dentro do container privilegiado em vez de
   `unlimited` (nenhum teto), `credit` (precisa de saldo, política em
   `hotspot_device_credit`), `quota` (até 3 tetos simultâneos e
   independentes — diário/semanal/mensal, cada um com seu acumulador em
-  `hotspot_device_quota_periods` e bloqueio rígido ao estourar) ou
-  `custom` (só válido em **perfil** — ver abaixo). Taxa
+  `hotspot_device_quota_periods` e bloqueio rígido ao estourar),
+  `time` (limitação por tempo, política em `hotspot_device_time` — ver
+  abaixo) ou `custom` (só válido em **perfil** — ver abaixo). Taxa
   (download/upload, Mbps) é sempre independente do tipo, configurável
-  nos 4 casos. Esse tipo único existe para impedir cota e crédito
-  ficarem ativos ao mesmo tempo no mesmo perfil/dispositivo (causa
-  histórica de bloqueio por crédito disfarçado de "cota parou de
+  em todos os casos concretos. Esse tipo único existe para impedir cota
+  e crédito ficarem ativos ao mesmo tempo no mesmo perfil/dispositivo
+  (causa histórica de bloqueio por crédito disfarçado de "cota parou de
   contabilizar").
+- **Limitação por tempo (`limitType = "time"`)** tem dois modos
+  (`hotspot_device_time.mode`), espelhando a mecânica do crédito (saldo
+  em `hotspot_device_time`, política herdada do perfil enquanto
+  `configured = false`, bloqueio via traffic block + portal cativo, os
+  mesmos de crédito/cota):
+  - `budget`: saldo de **segundos de conexão** (`balance_seconds`)
+    debitado enquanto o dispositivo está **associado** ao Wi-Fi, mesmo
+    ocioso (o ciclo de amostragem só roda para clientes ao vivo — ver
+    `reconcileDeviceTime`). Recarga periódica opcional (`recharge_seconds`
+    /`recharge_period`, com `plafond_seconds` de teto) reabastece o
+    saldo; o primeiro período é creditado **na hora** em que a política é
+    aplicada (`computeNextTimeRechargeAt` ancora em *agora*, não em
+    *agora+período*), então "1h por dia" já começa com 1h. Ao zerar,
+    bloqueia; **desbloqueia sozinho** quando o saldo volta (recarga
+    automática/manual) — diferente do crédito, não exige recarga
+    explícita para reabrir. Debito por ciclo tem teto (`maxTimeDebitSeconds`)
+    para não drenar o saldo em bloco após um downtime do backend.
+  - `deadline`: acesso liberado até `deadline_at`; passado o instante,
+    bloqueia (e desbloqueia se o prazo for estendido). Sem consumo de
+    saldo.
+  A recarga automática de tempo entra no mesmo ciclo de reconciliação da
+  de crédito (`applyAutomaticTimeRecharges`). A UI configura tempo em
+  **minutos** (convertidos para segundos na API) e deadline via
+  `<input type="datetime-local">`; no formulário de **dispositivo** o
+  tipo é escolhido mas a política mora na aba de tempo do dispositivo
+  (`PATCH /api/hotspot/devices/{mac}/time`), igual ao crédito.
 - **Taxa e cota aceitam valor fracionário** na unidade escolhida (ex.:
   cota diária de `1.5GB`, taxa de download de `17.5KB/s`), tanto em
   perfil quanto em override de dispositivo. O formulário aceita `.` ou
@@ -753,6 +780,60 @@ scripts tinham, só que dentro do container privilegiado em vez de
   corta o L2 e não há proxy NDP). Regras de perfil apagado somem junto
   com o perfil (mesma transação de `DeleteProfile`); os dispositivos
   dele voltam ao perfil Padrão.
+
+## Planos de bloqueio/permissão de conteúdo (`services/backend/internal/hotspot/hotspot_content*.go`, `services/worker/dns/internal/blocklist`, `services/worker/controller/internal/shaping/dns_enforce.go`)
+
+Controle de conteúdo (parental control / firewall de serviços) na aba
+**Conteúdo** do painel. Um **plano** (`hotspot_content_plans`) é um
+conjunto nomeado de **regras** (`hotspot_content_rules`) vinculável a um
+**perfil** ou a um **dispositivo** (colunas `content_plan_id`,
+precedência device→perfil, igual aos limites — ver
+`effectiveContentPlanID`).
+
+- **Regras** têm `kind` `domain` (ex.: `exemplo.com`, cobre subdomínios
+  por sufixo), `ip` (IP/CIDR) ou `category` (um slug de
+  `hotspot_content_categories`), e `action` `allow`/`block`. A política
+  padrão do plano (`default_action`) decide o não coberto: `allow` =
+  lista negra (bloqueia só o `block`), `block` = lista branca. **`allow`
+  vence `block`** no casamento.
+- **Categorias** (`hotspot_content_categories` + `_category_domains`) são
+  populadas de **blocklists públicas** (The Block List Project +
+  StevenBlack, formato hosts) por um job de sync no backend
+  (`StartContentBlocklistSyncLoop`, 1x/dia + gatilho manual), ou são
+  **embutidas** (sem `source_urls`, domínios semeados pela migration —
+  ex.: `app_stores`, `doh_bypass`). Categorias semeadas: `ads`, `adult`,
+  `gambling`, `social`, `app_stores`, `doh_bypass`, `torrent`, `piracy`,
+  `cryptomining`, `drugs`, `scam`, `malware`, `fakenews`. Evita cadastrar
+  site por site (ex.: bloquear `+18`/ads/lojas de apps/torrent). Algumas
+  listas são enormes (ex.: `malware` ~2,6M domínios).
+- **Bloqueio de domínio é feito no `dns-provider`** (pacote `blocklist`):
+  o backend publica o mapa IP→plano dos clientes ao vivo em
+  `hotspot_content_client_bindings` (canal Postgres, pois o backend não
+  fala Redis); o `dns-provider` carrega planos/regras + os domínios
+  **apenas das categorias referenciadas por algum plano** (não puxa
+  listas gigantes que ninguém usa para a memória) + esse mapa, em memória
+  por poll (só recarrega quando a assinatura de conteúdo muda) e, antes
+  de encaminhar um domínio público, resolve o plano pela origem e
+  responde `NXDOMAIN` (sinkhole) se bloqueado (casamento por sufixo:
+  bloquear `x.com` cobre `*.x.com`). Sem plano vinculado ao IP, nada
+  muda.
+- **Bloqueio de IP/CIDR** (`kind=ip`) entra na **zona WAN** do firewall
+  (reusa `compileZoneRules`/`BINDNET-FW-WAN`), casado por MAC do
+  cliente, na frente das regras de comunicação.
+- **Reforço de DNS** (decisão de projeto: bloqueio efetivo, difícil de
+  burlar) no worker (`dns_enforce.go`), ligado **só quando existe algum
+  plano vinculado** (senão o caminho de rede dos clientes não muda):
+  redireciona todo `:53` dos clientes para o gateway (quem troca de DNS
+  a mão não escapa) e bloqueia DNS criptografado conhecido — DoT (853) e
+  uma lista curada de IPs de provedores DoH em 443, **tanto TCP quanto
+  UDP/HTTP3** (só TCP deixava passar DoH sobre QUIC). É idempotente,
+  reaplicado no ciclo de reconciliação e desmontado no stop do hotspot.
+  Limitação: DoH para um IP fora da lista curada ainda escapa (inerente
+  a bloqueio DNS); o caso comum (celular/browser padrão) é coberto.
+- Toda mutação de plano/regra/vínculo reaplica ao vivo
+  (`applyContentLive`: republica o mapa + reaplica firewall + reforço de
+  DNS). O bloqueio de domínio depende do cliente usar o resolver local
+  (garantido pelo reforço de DNS acima).
 
 ## Serviço `dns-provider` (servidor DNS split-horizon próprio — `services/worker/dns/`)
 

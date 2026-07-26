@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HotspotLimitTypeFields } from "@/components/hotspot/HotspotLimitTypeFields";
+import { HotspotContentPlanSelect } from "@/components/hotspot/HotspotContentPlanSelect";
 import {
   hotspotProfileFormSchema,
   profileToFormValues,
@@ -34,6 +35,7 @@ export function HotspotProfileForm({ value, onSubmit, pending }: HotspotProfileF
     values: profileToFormValues(value),
   });
   const limitType = watch("limitType");
+  const timeMode = watch("timeMode");
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit((values) => onSubmit(formValuesToProfile(values)))}>
@@ -48,8 +50,12 @@ export function HotspotProfileForm({ value, onSubmit, pending }: HotspotProfileF
         errors={errors}
         limitType={limitType}
         onLimitTypeChange={(type) => setValue("limitType", type, { shouldDirty: true, shouldValidate: true })}
+        timeMode={timeMode}
+        onTimeModeChange={(mode) => setValue("timeMode", mode, { shouldDirty: true, shouldValidate: true })}
         includeCustom
       />
+
+      {value.id !== "" && <HotspotContentPlanSelect scope="profile" id={value.id} />}
 
       <Button type="submit" disabled={!isDirty || pending}>
         Salvar

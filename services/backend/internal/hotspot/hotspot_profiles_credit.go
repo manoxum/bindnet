@@ -82,5 +82,6 @@ func applyProfileShapingLive(ctx context.Context, db *sql.DB, worker *workerapi.
 		}
 		_ = ensureDeviceShaping(ctx, db, worker, iface, client.MAC, client.IP)
 		_, _ = syncDeviceCreditFromProfile(ctx, db, worker, client.MAC)
+		_, _ = syncDeviceTimeFromProfile(ctx, db, worker, client.MAC)
 	}
 }

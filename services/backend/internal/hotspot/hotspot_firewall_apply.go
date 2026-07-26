@@ -82,11 +82,21 @@ func applyFirewall(ctx context.Context, db *sql.DB, worker *workerapi.Client) er
 		return err
 	}
 
+	// Regras de IP/CIDR dos planos de conteudo entram na zona WAN, na
+	// FRENTE das regras de comunicacao (device+host especifico, deny
+	// primeiro): um "bloquear IP X para este dispositivo" do plano tem
+	// prioridade sobre a politica generica da zona.
+	contentRules, err := contentWANRules(db, isolationClients)
+	if err != nil {
+		return err
+	}
+	wanRules := append(contentRules, compileZoneRules(store.CommZoneWAN, isolationClients, profileOf, rules)...)
+
 	return worker.Call(ctx, http.MethodPost, "/hotspot/firewall/apply", firewallApplyPayload{
 		Interface:   iface,
 		Enabled:     true,
 		WanPolicy:   zonePolicy(config, "FW_WAN_POLICY"),
-		WanRules:    compileZoneRules(store.CommZoneWAN, isolationClients, profileOf, rules),
+		WanRules:    wanRules,
 		LocalPolicy: zonePolicy(config, "FW_LOCAL_POLICY"),
 		LocalRules:  compileZoneRules(store.CommZoneLocal, isolationClients, profileOf, rules),
 	}, nil)

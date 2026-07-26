@@ -27,6 +27,8 @@ var essentialLocalAllows = []struct {
 }
 
 func syncLocalChain(apIface, policy string, rules []firewallZonePayload) error {
+	// Cria o chain antes do jump (ver comentario em syncWanChain).
+	_ = runIptables("-N", fwLocalChain)
 	if err := ensureLocalJump(apIface); err != nil {
 		return err
 	}

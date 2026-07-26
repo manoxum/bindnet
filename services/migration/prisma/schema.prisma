@@ -304,6 +304,8 @@ model HotspotDeviceLimits {
   monthlyQuotaBytes BigInt? @map("monthly_quota_bytes")
   monthlyQuotaUnit  String  @default("gbyte") @map("monthly_quota_unit")
 
+  contentPlanId String? @map("content_plan_id") @db.Uuid
+
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
 
   @@map("hotspot_device_limits")
@@ -396,6 +398,30 @@ model HotspotDeviceCredit {
   @@map("hotspot_device_credit")
 }
 
+// Saldo/estado da limitacao por tempo de um dispositivo (LimitType
+// "time") - espelha HotspotDeviceCredit. mode budget = saldo de
+// segundos de conexao gasto enquanto associado; mode deadline = acesso
+// ate deadlineAt. lastChargedAt e o marco do ultimo debito de tempo (o
+// debito e now - lastChargedAt). blockedByTime separado do bloqueio
+// manual, igual blockedByCredit. Ver hotspot_reconcile_time.go.
+model HotspotDeviceTime {
+  macAddress      String    @id @map("mac_address")
+  enabled         Boolean   @default(false)
+  mode            String    @default("budget")
+  balanceSeconds  BigInt    @default(0) @map("balance_seconds")
+  rechargeSeconds BigInt?   @map("recharge_seconds")
+  rechargePeriod  String?   @map("recharge_period")
+  plafondSeconds  BigInt?   @map("plafond_seconds")
+  nextRechargeAt  DateTime? @map("next_recharge_at") @db.Timestamptz
+  deadlineAt      DateTime? @map("deadline_at") @db.Timestamptz
+  lastChargedAt   DateTime? @map("last_charged_at") @db.Timestamptz
+  blockedByTime   Boolean   @default(false) @map("blocked_by_time")
+  configured      Boolean   @default(false)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_device_time")
+}
+
 // Historico/extrato de mutacoes de saldo de credito por dispositivo -
 // recarga manual, recarga automatica e resgate de voucher. O debito de
 // trafego (entryType "debit") deixou de ser gravado aqui a partir da
@@ -481,10 +507,89 @@ model HotspotProfile {
   monthlyQuotaBytes BigInt? @map("monthly_quota_bytes")
   monthlyQuotaUnit  String  @default("gbyte") @map("monthly_quota_unit")
 
+  // Politica do tipo 'time' (limitacao por tempo) - espelha as colunas
+  // credit_* acima. Ver hotspot_device_time abaixo e
+  // hotspot_reconcile_time.go. mode budget/deadline.
+  timeMode            String?   @map("time_mode")
+  timeRechargeSeconds BigInt?   @map("time_recharge_seconds")
+  timeRechargePeriod  String?   @map("time_recharge_period")
+  timePlafondSeconds  BigInt?   @map("time_plafond_seconds")
+  timeDeadlineAt      DateTime? @map("time_deadline_at") @db.Timestamptz
+
+  contentPlanId String? @map("content_plan_id") @db.Uuid
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
 
   @@map("hotspot_profiles")
+}
+
+// Plano de bloqueio/permissao de conteudo (parental control / firewall
+// de servicos) - conjunto nomeado de regras vinculavel a perfil ou
+// device. Ver services/backend/internal/hotspot/content e RULE.md.
+// defaultAction: 'allow' = lista negra (bloqueia so o que casar block),
+// 'block' = lista branca. Sem @relation (mesmo idioma do resto do
+// schema); regras filhas removidas pela aplicacao.
+model HotspotContentPlan {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String   @unique
+  description   String   @default("")
+  defaultAction String   @default("allow") @map("default_action")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_content_plans")
+}
+
+// Regra de um plano: kind domain/category resolvidos pelo dns-provider,
+// ip (IP/CIDR) pela zona WAN do firewall. action allow vence block na
+// resolucao (ver compileContentPlan).
+model HotspotContentRule {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  planId    String   @map("plan_id") @db.Uuid
+  kind      String
+  value     String
+  action    String   @default("block")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([planId])
+  @@map("hotspot_content_rules")
+}
+
+// Catalogo de categorias. sourceUrls (uma URL por linha) sao blocklists
+// publicas (formato hosts); categorias sem sourceUrls sao embutidas
+// (dominios semeados pela migration).
+model HotspotContentCategory {
+  slug         String    @id
+  name         String
+  sourceUrls   String    @default("") @map("source_urls")
+  enabled      Boolean   @default(true)
+  lastSyncedAt DateTime? @map("last_synced_at") @db.Timestamptz
+  domainCount  BigInt    @default(0) @map("domain_count")
+  updatedAt    DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_content_categories")
+}
+
+// Dominios materializados de cada categoria (pelo sync ou semeados).
+model HotspotContentCategoryDomain {
+  categorySlug String @map("category_slug")
+  domain       String
+
+  @@unique([categorySlug, domain])
+  @@index([categorySlug])
+  @@map("hotspot_content_category_domains")
+}
+
+// Mapa IP -> plano dos clientes ao vivo, publicado pelo backend e lido
+// pelo dns-provider (canal Postgres porque o backend nao fala Redis).
+model HotspotContentClientBinding {
+  ip         String   @id
+  planId     String   @map("plan_id") @db.Uuid
+  macAddress String   @default("") @map("mac_address")
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("hotspot_content_client_bindings")
 }
 
 // Regra de comunicacao entre clientes do hotspot

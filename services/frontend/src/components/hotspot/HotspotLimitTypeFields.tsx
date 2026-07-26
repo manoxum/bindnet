@@ -5,8 +5,9 @@ import { SelectNative } from "@/components/ui/select-native";
 import { RateUnitOptions } from "@/components/hotspot/RateUnitOptions";
 import { HotspotRateFields } from "@/components/hotspot/HotspotRateFields";
 import { HotspotCreditConfigFields } from "@/components/hotspot/HotspotCreditConfigFields";
+import { HotspotTimeConfigFields } from "@/components/hotspot/HotspotTimeConfigFields";
 import { HotspotLimitTypeToggle } from "@/components/hotspot/HotspotLimitTypeToggle";
-import type { LimitType } from "@/components/hotspot/hotspot-limits-types";
+import type { LimitType, TimeMode } from "@/components/hotspot/hotspot-limits-types";
 
 // Fieldset de limite de dispositivo (override) ou perfil - taxa
 // (sempre independente do tipo) + seletor de tipo unico e mutuamente
@@ -35,6 +36,9 @@ export function HotspotLimitTypeFields({
   limitType,
   onLimitTypeChange,
   showCreditRechargeFields = true,
+  showTimeConfigFields = true,
+  timeMode = "budget",
+  onTimeModeChange,
   includeCustom = false,
 }: {
   register: UseFormRegister<any>;
@@ -42,6 +46,12 @@ export function HotspotLimitTypeFields({
   limitType: LimitType;
   onLimitTypeChange: (type: LimitType) => void;
   showCreditRechargeFields?: boolean;
+  // showTimeConfigFields=false (uso em dispositivo): a politica de tempo
+  // do dispositivo mora na aba Tempo dele (PATCH .../time), igual ao
+  // credito - aqui so o tipo e escolhido.
+  showTimeConfigFields?: boolean;
+  timeMode?: TimeMode;
+  onTimeModeChange?: (mode: TimeMode) => void;
   includeCustom?: boolean;
 }) {
   return (
@@ -67,6 +77,13 @@ export function HotspotLimitTypeFields({
           <p className="text-sm text-muted-foreground">
             Saldo e recarga são configurados na aba "Crédito" do dispositivo.
           </p>
+        ))}
+
+      {limitType === "time" &&
+        (showTimeConfigFields ? (
+          <HotspotTimeConfigFields register={register} mode={timeMode} onModeChange={(mode) => onTimeModeChange?.(mode)} />
+        ) : (
+          <p className="text-sm text-muted-foreground">Modo e saldo de tempo são configurados na aba "Tempo" do dispositivo.</p>
         ))}
 
       {limitType === "quota" && (

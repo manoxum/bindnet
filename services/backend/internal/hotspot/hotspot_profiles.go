@@ -44,6 +44,10 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 			http.Error(w, "campo 'limitType' invalido", http.StatusBadRequest)
 			return
 		}
+		if !validProfileTimePolicy(req) {
+			http.Error(w, "politica de tempo invalida (modo/periodo)", http.StatusBadRequest)
+			return
+		}
 		profile, err := store.InsertProfile(db, req)
 		if errors.Is(err, store.ErrHotspotProfileNameTaken) {
 			http.Error(w, err.Error(), http.StatusConflict)
@@ -83,6 +87,10 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 		}
 		if req.LimitType != "" && !store.IsValidLimitType(req.LimitType, true) {
 			http.Error(w, "campo 'limitType' invalido", http.StatusBadRequest)
+			return
+		}
+		if !validProfileTimePolicy(req) {
+			http.Error(w, "politica de tempo invalida (modo/periodo)", http.StatusBadRequest)
 			return
 		}
 		profile, found, err := store.UpdateProfile(db, id, req)

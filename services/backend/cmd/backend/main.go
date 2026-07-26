@@ -86,6 +86,10 @@ func main() {
 	hotspot.RegisterHotspotDeviceSpeedHistoryRoutes(mux, admin, speedHistory)
 	hotspot.RegisterHotspotCreditRoutes(mux, admin, database, worker, auditClient)
 	hotspot.RegisterHotspotCreditHistoryRoutes(mux, admin, database)
+	hotspot.RegisterHotspotTimeRoutes(mux, admin, database, worker, auditClient)
+	hotspot.RegisterHotspotContentRoutes(mux, admin, database, worker, auditClient)
+	hotspot.RegisterHotspotContentCategoryRoutes(mux, admin, database)
+	hotspot.RegisterHotspotContentLinkRoutes(mux, admin, database, worker)
 	hotspot.RegisterHotspotSessionRoutes(mux, admin, database, creditTrace)
 	hotspot.RegisterHotspotStatsRoutes(mux, admin, database, worker)
 	hotspot.RegisterHotspotProfileRoutes(mux, admin, database, worker, auditClient)
@@ -103,6 +107,7 @@ func main() {
 	go hotspot.AutoStartHotspotOnBoot(database, worker, auditClient)
 	go hotspot.StartHotspotReconciliationLoop(database, worker, auditClient, 15*time.Second)
 	go hotspot.StartHotspotUsageSamplingLoop(database, worker, creditTrace, speedHistory, time.Second)
+	go hotspot.StartContentBlocklistSyncLoop(database, 24*time.Hour)
 
 	port := config.Getenv("BACKEND_PORT", "8090")
 	log.Println("[backend] ouvindo em :" + port)

@@ -25,6 +25,10 @@ services:
       REDIS_HOST: 10.91.0.11
       NGINX_CONFIG_PATH: /nginx-config
       DISCOVER_PORT: ${DISCOVER_PORT:-8531}
+      # Diagnostico temporario: loga toda consulta publica de cliente do
+      # hotspot com a decisao (BLOCK/allow), para ver se um dominio chega
+      # ao resolver ou o cliente desvia por DoH/DoT.
+      DNS_DEBUG_QUERIES: ${DNS_DEBUG_QUERIES:-false}
     volumes:
       - nginx_config:/nginx-config:ro
     depends_on:

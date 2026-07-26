@@ -6,23 +6,31 @@ package dnsserver
 import (
 	"log"
 	"net"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/miekg/dns"
 
+	"bindnet/dns-provider/internal/blocklist"
 	"bindnet/dns-provider/internal/core"
 	"bindnet/dns-provider/internal/zones"
 )
 
 var upstreamServers = []string{"8.8.8.8:53", "1.1.1.1:53"}
 
+// debugQueries=true (env DNS_DEBUG_QUERIES) loga toda consulta publica de
+// cliente do hotspot com a decisao (BLOCK/allow) - ferramenta de
+// diagnostico para ver se um dominio esta chegando ao resolver (e sendo
+// bloqueado) ou se o cliente esta desviando por DoH/DoT.
+var debugQueries = os.Getenv("DNS_DEBUG_QUERIES") == "true"
+
 // NewHandler devolve o handler dns.HandlerFunc para uma view especifica -
 // cada listener (ver cmd/dns-provider/main.go) usa sua propria instancia,
 // entao o handler ja sabe, por closure, qual resposta fixa dar para
 // containers/hotspot e so precisa de logica extra (Postgres+Redis) para a
 // view do host.
-func NewHandler(cfg *core.Config, v core.View, responseIP string) dns.HandlerFunc {
+func NewHandler(cfg *core.Config, v core.View, responseIP string, blocks *blocklist.Store) dns.HandlerFunc {
 	return func(w dns.ResponseWriter, r *dns.Msg) {
 		if len(r.Question) != 1 {
 			forwardVia(w, r, upstreamServers)
@@ -34,6 +42,19 @@ func NewHandler(cfg *core.Config, v core.View, responseIP string) dns.HandlerFun
 		zone, kind, nextHop := zones.For(name, cfg)
 		switch kind {
 		case zones.None:
+			// Bloqueio de conteudo por dominio (planos vinculados ao
+			// cliente de origem): so dominios publicos passam por aqui;
+			// cliente sem plano nao casa nada e segue o fluxo normal.
+			if blocks != nil && blocks.Blocked(remoteIP(w), name) {
+				if debugQueries && v == core.ViewHotspot {
+					log.Printf("[dns-provider] BLOCK %s %s", remoteIP(w), name)
+				}
+				writeNXDomain(w, r)
+				return
+			}
+			if debugQueries && v == core.ViewHotspot {
+				log.Printf("[dns-provider] allow %s %s", remoteIP(w), name)
+			}
 			forwardVia(w, r, upstreamServers)
 			return
 		case zones.MeshUnknown:
@@ -84,6 +105,28 @@ func NewHandler(cfg *core.Config, v core.View, responseIP string) dns.HandlerFun
 
 		_ = w.WriteMsg(msg)
 	}
+}
+
+// remoteIP extrai o IP de origem da consulta (sem a porta) - e por ele
+// que o bloqueio de conteudo resolve qual plano vale.
+func remoteIP(w dns.ResponseWriter) string {
+	addr := w.RemoteAddr()
+	if addr == nil {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(addr.String()); err == nil {
+		return host
+	}
+	return addr.String()
+}
+
+// writeNXDomain responde NXDOMAIN (sinkhole do bloqueio de conteudo) -
+// mesma resposta usada para mesh desconhecido.
+func writeNXDomain(w dns.ResponseWriter, r *dns.Msg) {
+	msg := new(dns.Msg)
+	msg.SetReply(r)
+	msg.Rcode = dns.RcodeNameError
+	_ = w.WriteMsg(msg)
 }
 
 func dnsUpstreamForNextHop(nextHop string) string {

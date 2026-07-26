@@ -14,11 +14,13 @@ import (
 	"strings"
 	"time"
 
+	"bindnet/dns-provider/internal/blocklist"
 	"bindnet/dns-provider/internal/cache"
 	"bindnet/dns-provider/internal/config"
 	"bindnet/dns-provider/internal/core"
 	"bindnet/dns-provider/internal/discover"
 	"bindnet/dns-provider/internal/dnsserver"
+	"bindnet/dns-provider/internal/l7filter"
 	"bindnet/dns-provider/internal/netdetect"
 	"bindnet/dns-provider/internal/nginx"
 	"bindnet/dns-provider/internal/store"
@@ -155,18 +157,32 @@ func main() {
 	// assim que Postgres/Redis/fingerprint estiverem prontos, para que um
 	// gateway Docker ou HOST_SOURCE_CIDR ausente/desatualizado nunca torne
 	// este no invisivel para quem esta tentando descobri-lo.
+	// Bloqueio de conteudo por dominio: foto em memoria alimentada por
+	// poll do Postgres (planos/regras/categorias + mapa IP->plano
+	// publicado pelo backend). Inofensivo enquanto nao ha planos - o
+	// Blocked so age quando o IP de origem tem plano vinculado.
+	blocks := blocklist.NewStore()
+	go blocks.StartPoll(db, 10*time.Second)
+
+	// Filtro de conteudo L7 (complementar ao DNS): o worker redireciona
+	// 443/80 dos clientes com plano para estas portas locais; o proxy le
+	// SNI/Host e bloqueia/encaminha pela MESMA blocklist. Pega quem burla
+	// o DNS (troca de resolver, acesso por IP direto).
+	l7filter.StartSNIProxy("0.0.0.0:"+config.Getenv("L7_SNI_PORT", "8443"), blocks)
+	l7filter.StartHTTPProxy("0.0.0.0:"+config.Getenv("L7_HTTP_PORT", "8082"), blocks)
+
 	go discover.StartServer(cfg, discoverPort)
 	go discover.PollPeers(cfg)
 
 	for _, gateway := range dockerGateways {
 		gateway := gateway
-		go serveWhenIPAvailable(gateway, "gateway Docker", timeout, dnsserver.NewHandler(cfg, core.ViewContainer, gateway))
+		go serveWhenIPAvailable(gateway, "gateway Docker", timeout, dnsserver.NewHandler(cfg, core.ViewContainer, gateway, blocks))
 	}
 	for _, hostIP := range hostSourceIPs {
 		hostIP := hostIP
-		go serveWhenIPAvailable(hostIP, "peer/LAN (HOST_SOURCE_CIDR)", timeout, dnsserver.NewHandler(cfg, core.ViewContainer, hostIP))
+		go serveWhenIPAvailable(hostIP, "peer/LAN (HOST_SOURCE_CIDR)", timeout, dnsserver.NewHandler(cfg, core.ViewContainer, hostIP, blocks))
 	}
-	go serveWhenIPAvailable(hotspotGateway, "hotspot", timeout, dnsserver.NewHandler(cfg, core.ViewHotspot, hotspotGateway))
+	go serveWhenIPAvailable(hotspotGateway, "hotspot", timeout, dnsserver.NewHandler(cfg, core.ViewHotspot, hotspotGateway, blocks))
 
-	log.Fatalf("[dns-provider] erro no servidor: %v", dnsserver.Serve("127.0.0.1:53", dnsserver.NewHandler(cfg, core.ViewHost, "")))
+	log.Fatalf("[dns-provider] erro no servidor: %v", dnsserver.Serve("127.0.0.1:53", dnsserver.NewHandler(cfg, core.ViewHost, "", blocks)))
 }

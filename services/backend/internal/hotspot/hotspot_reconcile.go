@@ -78,8 +78,21 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 	applyIsolationLive(ctx, db, worker)
 	// Zonas wan/local do firewall: mesmo ciclo, tambem idempotentes.
 	applyFirewallLive(ctx, db, worker)
+	// Mapa IP->plano de conteudo (lido pelo dns-provider) - cobre
+	// cliente novo conectando e renovacao de DHCP, mesmo ciclo.
+	if err := publishContentBindings(ctx, db, worker); err != nil {
+		log.Printf("[backend] publicacao do mapa IP->plano de conteudo falhou: %v", err)
+	}
+	// Reforco de DNS (forcar :53 + DoH/DoT) - ligado so quando ha plano
+	// de conteudo em uso; idempotente no worker.
+	applyDNSForceLive(ctx, db, worker)
+	// Filtro L7 (REDIRECT 443/80 -> proxy transparente de SNI/Host).
+	applyL7FilterLive(ctx, db, worker)
 	if err := applyAutomaticRecharges(db); err != nil {
 		log.Printf("[backend] recarga automatica de credito falhou: %v", err)
+	}
+	if err := applyAutomaticTimeRecharges(db); err != nil {
+		log.Printf("[backend] recarga automatica de tempo falhou: %v", err)
 	}
 }
 

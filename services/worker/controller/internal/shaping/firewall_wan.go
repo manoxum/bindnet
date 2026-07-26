@@ -15,6 +15,11 @@ import (
 const fwWanJumpComment = "bn-fw-wan-jump"
 
 func syncWanChain(apIface, uplinkIface, policy string, rules []firewallZonePayload) error {
+	// Cria o chain ANTES de inserir o jump: apos um restart do worker os
+	// chains somem (sao runtime), e inserir "-j BINDNET-FW-WAN" antes de
+	// o chain existir falha com "Chain does not exist", quebrando o apply
+	// do firewall a cada ciclo.
+	_ = runIptables("-N", fwWanChain)
 	if err := ensureWanJumpAboveHotspot(apIface, uplinkIface); err != nil {
 		return err
 	}

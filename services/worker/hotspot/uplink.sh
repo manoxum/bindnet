@@ -119,6 +119,39 @@ apply_bindnet_uplink_rules() {
   log "Fonte real de internet do hotspot: ${interface_display}; create_ap recebe uplink virtual estavel ${CREATE_AP_INTERNET_INTERFACE}."
 }
 
+# neutralize_create_ap_forward remove as duas regras ACCEPT largas que o
+# create_ap injeta no FORWARD quando o AP sobe: o upload
+# "-s <HOTSPOT_CIDR> -i <ap>" e o download "-d <HOTSPOT_CIDR> -i bn-uplink".
+# Ele as insere com "-I FORWARD" (topo) depois de setup_bindnet_virtual_uplink
+# ja ter posto o jump BINDNET-HOTSPOT no topo, entao acabam ACIMA do
+# jump - e o upload de todo cliente e aceito ali, antes de
+# BINDNET-HOTSPOT ser avaliado, furando o bloqueio por falta de credito
+# e o bloqueio manual em modo "traffic" (cujos DROP vivem dentro dessa
+# chain, ver traffic_block.go no controller). Essas regras sao inuteis
+# aqui: o create_ap mascarada para o dummy bn-uplink, e o
+# NAT/forward real e feito por apply_bindnet_uplink_rules
+# (BINDNET-HOTSPOT + MASQUERADE para a interface fisica). Removendo-as,
+# BINDNET-HOTSPOT volta a ser o unico gate de forwarding do hotspot, sem
+# perder conectividade. Chamada assim que o AP sobe ("AP-ENABLED", ver
+# watchdog.sh); o create_ap nao as recria em operacao e, num restart, o
+# "AP-ENABLED" seguinte dispara a limpeza de novo.
+neutralize_create_ap_forward() {
+  local subnet="${HOTSPOT_CIDR}"
+  [[ -n "${subnet}" ]] || return 0
+  local rule
+  iptables -w -S FORWARD 2>/dev/null | while IFS= read -r rule; do
+    case "${rule}" in
+      "-A FORWARD "*"${subnet}"*"-j ACCEPT")
+        # "-A FORWARD <spec>" -> "-D FORWARD <spec>" (split proposital
+        # do spec em argumentos para o iptables).
+        if iptables -w -D FORWARD ${rule#-A FORWARD } >/dev/null 2>&1; then
+          log "Removida regra ACCEPT larga do create_ap no FORWARD (${rule#-A FORWARD }); BINDNET-HOTSPOT volta a ser o gate de bloqueio."
+        fi
+        ;;
+    esac
+  done
+}
+
 setup_bindnet_virtual_uplink() {
   validate_real_internet_interface
 

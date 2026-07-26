@@ -54,6 +54,8 @@ func main() {
 	shaping.RegisterIsolationRoutes(mux)
 	shaping.RegisterFirewallRoutes(mux)
 	shaping.RegisterCaptivePortalRoutes(mux)
+	shaping.RegisterDNSEnforceRoutes(mux)
+	shaping.RegisterL7FilterRoutes(mux)
 	shaping.StartCaptivePortalResponder()
 
 	log.Println("[worker] API interna pronta em", socketPath)

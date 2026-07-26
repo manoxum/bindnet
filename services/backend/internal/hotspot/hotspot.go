@@ -124,6 +124,14 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 			if err := teardownFirewallWorker(r.Context(), worker, iface); err != nil {
 				log.Printf("[backend] aviso: falha ao desmontar firewall (wan/local): %v", err)
 			}
+			// Idem para o reforco de DNS (forcar :53 + DoH/DoT).
+			if err := teardownDNSForceWorker(r.Context(), worker, iface); err != nil {
+				log.Printf("[backend] aviso: falha ao desmontar reforco de DNS: %v", err)
+			}
+			// Idem para o filtro de conteudo L7 (REDIRECT 443/80).
+			if err := teardownL7FilterWorker(r.Context(), worker, iface); err != nil {
+				log.Printf("[backend] aviso: falha ao desmontar filtro L7: %v", err)
+			}
 		}
 		if err := store.SetHotspotDesiredState(r.Context(), db, false); err != nil {
 			log.Printf("[backend] falha ao gravar estado desejado do hotspot (parado): %v", err)

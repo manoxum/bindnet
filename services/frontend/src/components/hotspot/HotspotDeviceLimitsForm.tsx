@@ -44,6 +44,7 @@ export function HotspotDeviceLimitsForm({ value, onSubmit, pending }: HotspotDev
         limitType={limitType}
         onLimitTypeChange={(type) => setValue("limitType", type, { shouldDirty: true, shouldValidate: true })}
         showCreditRechargeFields={false}
+        showTimeConfigFields={false}
       />
 
       <Button type="submit" disabled={!isDirty || pending}>

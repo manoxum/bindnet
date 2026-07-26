@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { bytesToGB, formatQuotaValue, LIMIT_TYPE_LABELS } from "@/components/hotspot/hotspot-limits-types";
+import { bytesToGB, formatDurationSeconds, formatQuotaValue, LIMIT_TYPE_LABELS } from "@/components/hotspot/hotspot-limits-types";
 import { HotspotProfileForm } from "@/components/hotspot/HotspotProfileForm";
 import { useHotspotProfiles } from "@/components/hotspot/useHotspotProfileQueries";
 import { useHotspotProfileMutations } from "@/components/hotspot/useHotspotProfileMutations";
@@ -30,6 +30,11 @@ const emptyProfile: HotspotProfile = {
   creditRechargeAmountBytes: null,
   creditRechargePeriod: null,
   creditPlafondBytes: null,
+  timeMode: null,
+  timeRechargeSeconds: null,
+  timeRechargePeriod: null,
+  timePlafondSeconds: null,
+  timeDeadlineAt: null,
 };
 
 function rateSummary(profile: HotspotProfile) {
@@ -52,6 +57,14 @@ function typeDetailSummary(profile: HotspotProfile) {
     const configured = periods.filter(([bytes]) => bytes !== null) as [number, string, typeof profile.dailyQuotaUnit][];
     if (configured.length === 0) return "sem teto definido";
     return configured.map(([bytes, label, unit]) => `${formatQuotaValue(bytes, unit)}/${label}`).join(", ");
+  }
+  if (profile.limitType === "time") {
+    if (profile.timeMode === "deadline") {
+      return profile.timeDeadlineAt ? `até ${new Date(profile.timeDeadlineAt).toLocaleString()}` : "prazo não definido";
+    }
+    return profile.timeRechargeSeconds
+      ? `${formatDurationSeconds(profile.timeRechargeSeconds)}/${profile.timeRechargePeriod}`
+      : "só recarga manual";
   }
   if (profile.limitType === "custom") return "dispositivo define";
   return "—";
