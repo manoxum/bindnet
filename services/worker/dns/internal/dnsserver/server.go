@@ -66,6 +66,16 @@ func NewHandler(cfg *core.Config, v core.View, responseIP string, blocks *blockl
 		case zones.Remote:
 			forwardVia(w, r, []string{dnsUpstreamForNextHop(nextHop)})
 			return
+		case zones.LocalWildcard:
+			// Casou so pelo curinga de TLD local. Para clientes do hotspot
+			// isso e quase sempre um dominio publico bloqueado que o SO
+			// reanexou o search-domain (ex.: "xvideos.com.local") - devolve
+			// NXDOMAIN para nao cair no gateway/painel. Nas views host/
+			// container mantem a resolucao local (loopback), como antes.
+			if v == core.ViewHotspot {
+				writeNXDomain(w, r)
+				return
+			}
 		}
 
 		msg := new(dns.Msg)

@@ -24,6 +24,13 @@ const (
 	Local
 	Remote      // dono e outro no da malha, rota conhecida -> proxy pro proximo salto
 	MeshUnknown // dentro de DOMAINS, mas sem dono local nem rota -> NXDOMAIN
+	// LocalWildcard: casou so pelo curinga de TLD local (ex.: qualquer
+	// "*.local"), sem ser um host/zona/rota concreta conhecida. Views
+	// host/container resolvem normal (loopback); a view do HOTSPOT devolve
+	// NXDOMAIN - senao um cliente que reanexa o search-domain a um dominio
+	// bloqueado ("xvideos.com" -> "xvideos.com.local") cairia no gateway/
+	// painel em vez de falhar limpo. Ver dnsserver.
+	LocalWildcard
 )
 
 // For decide como resolver um nome. Alem da zona/tipo, devolve o proximo
@@ -59,7 +66,7 @@ func For(fqdn string, cfg *core.Config) (zone string, kind Kind, nextHop string)
 	// "local.com", "a.b.local"), e um sufixo declarado explicitamente em
 	// DNS_LOCAL_TLDS vence o fallback mesh-unknown de DOMAINS abaixo.
 	if zone, ok := SuffixZoneFor(labels, cfg.TLDs); ok {
-		return zone + ".", Local, ""
+		return zone + ".", LocalWildcard, ""
 	}
 	if zone, ok := SuffixZoneFor(labels, cfg.DomainZones); ok {
 		return zone + ".", MeshUnknown, ""

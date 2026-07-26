@@ -90,11 +90,14 @@ func TestZoneForMultiLabelLocalTLDMatchesAnyDepth(t *testing.T) {
 		zone string
 		kind Kind
 	}{
-		{"foo.local.", "local.", Local},
-		{"local.com.", "local.com.", Local},
-		{"app.local.com.", "local.com.", Local},
-		{"x.y.z.local.com.", "local.com.", Local},
-		{"svc.a.b.local.org.", "a.b.local.org.", Local},
+		// Curinga de TLD local casa em qualquer profundidade, mas agora
+		// como LocalWildcard (host/container resolvem; hotspot -> NXDOMAIN,
+		// ver dnsserver).
+		{"foo.local.", "local.", LocalWildcard},
+		{"local.com.", "local.com.", LocalWildcard},
+		{"app.local.com.", "local.com.", LocalWildcard},
+		{"x.y.z.local.com.", "local.com.", LocalWildcard},
+		{"svc.a.b.local.org.", "a.b.local.org.", LocalWildcard},
 		{"other.com.", "com.", None},
 		{"b.local.org.", "org.", None},
 	}
@@ -116,8 +119,8 @@ func TestZoneForLocalTLDWinsOverBroadMeshRoot(t *testing.T) {
 	}
 
 	zone, kind, _ := For("web.apps.bnet.", cfg)
-	if zone != "apps.bnet." || kind != Local {
-		t.Fatalf("For(web.apps.bnet.) = (%q, %v), want local apps.bnet.", zone, kind)
+	if zone != "apps.bnet." || kind != LocalWildcard {
+		t.Fatalf("For(web.apps.bnet.) = (%q, %v), want localwildcard apps.bnet.", zone, kind)
 	}
 	zone, kind, _ = For("web.other.bnet.", cfg)
 	if zone != "bnet." || kind != MeshUnknown {
