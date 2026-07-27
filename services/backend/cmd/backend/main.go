@@ -96,6 +96,7 @@ func main() {
 	hotspot.RegisterHotspotIsolationRoutes(mux, admin, database, worker, auditClient)
 	hotspot.RegisterHotspotFirewallRoutes(mux, admin, database, worker, auditClient)
 	hotspot.RegisterHotspotVoucherRoutes(mux, admin, database, auditClient)
+	hotspot.RegisterHotspotMessageRoutes(mux, admin, database, worker, auditClient)
 	hotspot.RegisterHotspotPortalRoutes(mux, database, worker, auditClient)
 	dns.RegisterDNSRoutes(mux, worker, admin, auditClient, database)
 	dns.RegisterDNSRouteRoutes(mux, admin, database, auditClient)

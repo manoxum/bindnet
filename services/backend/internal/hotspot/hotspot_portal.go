@@ -97,6 +97,8 @@ func RegisterHotspotPortalRoutes(mux *http.ServeMux, db *sql.DB, worker *workera
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(entries)
 	})
+
+	registerHotspotPortalMessageRoutes(mux, db, worker)
 }
 
 func portalMeResponse(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac string) (hotspotPortalMeResponse, error) {

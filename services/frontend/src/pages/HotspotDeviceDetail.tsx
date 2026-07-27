@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, CreditCard, LayoutGrid, Sliders } from "lucide-react";
+import { ArrowLeft, CreditCard, LayoutGrid, MessageSquare, Sliders } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,6 +11,7 @@ import { DeviceLimitsTab } from "@/components/hotspot/device-detail/DeviceLimits
 import { DeviceCreditCard } from "@/components/hotspot/device-detail/DeviceCreditCard";
 import { DeviceMovementsCard } from "@/components/hotspot/device-detail/DeviceMovementsCard";
 import { DeviceSpeedGaugeCard } from "@/components/hotspot/device-detail/DeviceSpeedGaugeCard";
+import { HotspotMessageDialog } from "@/components/hotspot/messages/HotspotMessageDialog";
 import { SPEED_CHART_DEFAULT_WINDOW_MINUTES } from "@/components/hotspot/device-detail/speed-chart-windows";
 import { usePageHeader } from "@/hooks/usePageHeader";
 import { useUrlTab } from "@/hooks/useUrlTab";
@@ -55,6 +56,7 @@ export function HotspotDeviceDetailPage() {
   // valor na mesma unidade escolhida no grafico.
   const [windowMinutes, setWindowMinutes] = useState(SPEED_CHART_DEFAULT_WINDOW_MINUTES);
   const [unitNature, setUnitNature] = useState<ByteNature>("bit");
+  const [messageOpen, setMessageOpen] = useState(false);
   const [tab, setTab] = useUrlTab("overview");
 
   const { clients, knownDevices } = useHotspotQueries();
@@ -98,8 +100,14 @@ export function HotspotDeviceDetailPage() {
             const status = blockStatusLabel(client, online);
             return <Badge variant={status.variant}>{status.label}</Badge>;
           })()}
+          <Button size="sm" variant="outline" className="sm:ml-auto" onClick={() => setMessageOpen(true)}>
+            <MessageSquare className="h-4 w-4" />
+            <span className="hidden sm:inline">Enviar aviso</span>
+          </Button>
         </div>
       </div>
+
+      <HotspotMessageDialog open={messageOpen} onOpenChange={setMessageOpen} lockedMac={client.mac} />
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="grid h-auto w-full grid-cols-3 sm:inline-grid sm:w-auto">

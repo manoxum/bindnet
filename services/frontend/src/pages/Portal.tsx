@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HotspotQuotaPeriodBars } from "@/components/hotspot/HotspotQuotaPeriodBars";
 import { bytesToGB } from "@/components/hotspot/hotspot-limits-types";
+import { PortalMessages } from "@/components/portal/PortalMessages";
 import { usePortalMe } from "@/components/portal/usePortalQueries";
 import { useRedeemVoucher } from "@/components/portal/usePortalMutations";
 import { PortalVoucherQrScanner } from "@/components/portal/PortalVoucherQrScanner";
@@ -36,6 +37,8 @@ export function PortalPage() {
           <CardDescription>Veja seu saldo e resgate um cartão de recarga.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          <PortalMessages />
+
           {me.isLoading && <div className="h-40 animate-pulse rounded-lg border bg-muted/30" />}
 
           {me.isError && (

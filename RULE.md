@@ -671,6 +671,38 @@ scripts tinham, só que dentro do container privilegiado em vez de
   propósito. HTTPS não é interceptado (limitação universal de qualquer
   portal cativo).
 
+## Avisos aos dispositivos (`services/backend/internal/hotspot/hotspot_messages*.go`, `hotspot_portal_messages.go`)
+
+- **O que é**: o operador envia mensagens de texto aos dispositivos
+  conectados pelo painel (aba **Avisos** da tela de hotspot, ou botão
+  "Enviar aviso" na ficha de um dispositivo). Cada aviso é **broadcast**
+  (`target_mac` nulo, vai para todos os conectados) ou **direcionado** a
+  um único MAC. Guardado na tabela `hotspot_messages`; a leitura por
+  dispositivo é registrada em `hotspot_message_reads` (um MAC vê cada
+  aviso até tocar "Ok" no portal). Rotas admin (`GET/POST /api/hotspot/
+  messages`, `DELETE /api/hotspot/messages/{id}`) exigem sessão; a
+  remoção é *soft delete* (`active=false`), preservando a trilha.
+- **Entrega base (pull)**: o dispositivo vê o aviso na página pública
+  `/portal` (`GET /api/hotspot/portal/messages`), identificado pelo MAC
+  de origem exatamente como o resto do portal (`resolvePortalMAC`, nunca
+  um MAC vindo do cliente). Não expirado (`expires_at`) e não lido conta;
+  `POST /api/hotspot/portal/messages/{id}/read` marca lido.
+- **Entrega urgente (push)**: um aviso marcado **urgente** também dispara
+  o balão "Entrar na rede" do próprio SO **reusando o portal cativo por
+  MAC** já descrito acima (`applyCaptivePortalRedirect`) — **sem nenhuma
+  alteração de DNS nem interceptação L7**. Broadcast urgente liga o
+  redirect para todos os MACs conectados no momento; direcionado, só para
+  aquele MAC. É *best-effort* (só porta 80/HTTP, só loga em falha) — a
+  entrega garantida continua sendo o `/portal`.
+- **Coordenação com o bloqueio de crédito/cota**: o redirect de portal
+  cativo é "possuído" originalmente pelos reconciles de crédito/cota. O
+  push de aviso é **aditivo**: ao desligar (aviso lido/removido/expirado)
+  só remove o redirect se o MAC não estiver retido por bloqueio de
+  crédito (`blocked_by_credit`) ou cota (`hotspot_device_quota_periods.
+  blocked`). Edge conhecido e aceito: um reconcile de crédito/cota logo
+  em seguida pode desligar o push de um aviso urgente — mas o aviso
+  continua entregue pelo `/portal`.
+
 ## Isolamento de clientes (`services/backend/internal/hotspot/hotspot_isolation*.go`, `services/worker/controller/internal/shaping/isolation*.go`)
 
 - **Interruptor geral**: chave `CLIENT_ISOLATION` em `hotspot_config`

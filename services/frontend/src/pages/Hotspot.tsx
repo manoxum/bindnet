@@ -1,23 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { Tabs } from "@/components/ui/tabs";
 import { HotspotDialogs } from "@/components/hotspot/HotspotDialogs";
 import { HotspotTabsList } from "@/components/hotspot/HotspotTabsList";
-import { HotspotBlocklistCard } from "@/components/hotspot/HotspotBlocklistCard";
-import { HotspotClientsCard } from "@/components/hotspot/HotspotClientsCard";
-import { HotspotKnownDevicesCard } from "@/components/hotspot/HotspotKnownDevicesCard";
+import { HotspotTabsContent } from "@/components/hotspot/HotspotTabsContent";
 import { HotspotSummaryCard } from "@/components/hotspot/HotspotSummaryCard";
 import { interfaceLabel } from "@/components/hotspot/HotspotInterfacesTab";
-import { HotspotIsolationCard } from "@/components/hotspot/HotspotIsolationCard";
-import { HotspotContentCard } from "@/components/hotspot/HotspotContentCard";
-import { HotspotProfilesCard } from "@/components/hotspot/HotspotProfilesCard";
-import { HotspotVouchersCard } from "@/components/hotspot/HotspotVouchersCard";
 import { configSchema, type ConfigForm } from "@/components/hotspot/hotspot-schema";
 import { hotspotConfigDefaults } from "@/components/hotspot/hotspot-config-defaults";
 import { useHotspotQueries } from "@/components/hotspot/useHotspotQueries";
 import { useHotspotMutations } from "@/components/hotspot/useHotspotMutations";
-import { LogsPanel } from "@/components/LogsPanel";
 import { usePageHeader } from "@/hooks/usePageHeader";
 import { useUrlTab } from "@/hooks/useUrlTab";
 
@@ -28,11 +21,13 @@ export function HotspotPage() {
   const autoPromptedRef = useRef(false);
   const [tab, setTab] = useUrlTab("connected");
 
-  const { status, config, interfaces, clients, blocklist, knownDevices } = useHotspotQueries();
-  const { saveAndApply, switchUplink, start, stop, recoverWifi, block, unblock, clearLogs } = useHotspotMutations({
+  const queries = useHotspotQueries();
+  const { status, config, interfaces, clients, blocklist } = queries;
+  const mutations = useHotspotMutations({
     onSaveSuccess: () => setConfigOpen(false),
     onRecoverSuccess: () => setConfirmRecoverOpen(false),
   });
+  const { saveAndApply, switchUplink, start, stop, recoverWifi } = mutations;
 
   const {
     register,
@@ -128,56 +123,7 @@ export function HotspotPage() {
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <HotspotTabsList connectedCount={connectedCount} blockedCount={blockedCount} />
-
-        <TabsContent value="connected" className="mt-0">
-          <HotspotClientsCard
-            clients={clients.data ?? []}
-            running={!!status.data?.running}
-            blockPendingMac={block.isPending ? block.variables.mac : undefined}
-            unblockPendingMac={unblock.isPending ? unblock.variables : undefined}
-            onBlock={(mac, mode) => block.mutate({ mac, mode })}
-            onUnblock={(mac) => unblock.mutate(mac)}
-          />
-        </TabsContent>
-
-        <TabsContent value="blocked" className="mt-0">
-          <HotspotBlocklistCard
-            devices={blocklist.data ?? []}
-            unblockPendingMac={unblock.isPending ? unblock.variables : undefined}
-            onUnblock={(mac) => unblock.mutate(mac)}
-          />
-        </TabsContent>
-
-        <TabsContent value="known" className="mt-0">
-          <HotspotKnownDevicesCard
-            devices={knownDevices.data ?? []}
-            blockedMacs={blockedMacs}
-            blockPendingMac={block.isPending ? block.variables.mac : undefined}
-            unblockPendingMac={unblock.isPending ? unblock.variables : undefined}
-            onBlock={(mac, mode) => block.mutate({ mac, mode })}
-            onUnblock={(mac) => unblock.mutate(mac)}
-          />
-        </TabsContent>
-
-        <TabsContent value="profiles" className="mt-0">
-          <HotspotProfilesCard />
-        </TabsContent>
-
-        <TabsContent value="isolation" className="mt-0">
-          <HotspotIsolationCard knownDevices={knownDevices.data ?? []} />
-        </TabsContent>
-
-        <TabsContent value="content" className="mt-0">
-          <HotspotContentCard />
-        </TabsContent>
-
-        <TabsContent value="vouchers" className="mt-0">
-          <HotspotVouchersCard />
-        </TabsContent>
-
-        <TabsContent value="logs" className="mt-0">
-          <LogsPanel title="Logs do hotspot" path="/hotspot/logs" onClear={() => clearLogs.mutateAsync()} />
-        </TabsContent>
+        <HotspotTabsContent queries={queries} mutations={mutations} blockedMacs={blockedMacs} />
       </Tabs>
 
       <HotspotDialogs

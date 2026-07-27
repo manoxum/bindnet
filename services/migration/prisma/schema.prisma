@@ -667,3 +667,36 @@ model HotspotVoucher {
   @@index([batchId])
   @@map("hotspot_vouchers")
 }
+
+// Aviso/mensagem que o operador envia aos dispositivos conectados (ver
+// services/backend/internal/hotspot/hotspot_messages.go). targetMac NULL
+// = broadcast (todos os conectados); preenchido = aviso a um unico
+// dispositivo. urgent tambem forca o balao "Entrar na rede" via portal
+// cativo (best-effort). active=false = removida pelo admin (soft delete).
+model HotspotMessage {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title     String    @default("")
+  body      String
+  targetMac String?   @map("target_mac")
+  urgent    Boolean   @default(false)
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz
+
+  @@index([active])
+  @@index([targetMac])
+  @@map("hotspot_messages")
+}
+
+// Confirmacao de leitura por dispositivo: um MAC so ve cada mensagem ate
+// marca-la lida (botao "Ok" no portal).
+model HotspotMessageRead {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  messageId String   @map("message_id") @db.Uuid
+  mac       String
+  readAt    DateTime @default(now()) @map("read_at") @db.Timestamptz
+
+  @@unique([messageId, mac])
+  @@index([mac])
+  @@map("hotspot_message_reads")
+}

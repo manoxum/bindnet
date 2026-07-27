@@ -20,3 +20,15 @@ export interface PortalCreditHistoryEntry {
   balanceAfterBytes: number;
   createdAt: string;
 }
+
+// Aviso que o operador enviou ao dispositivo - GET /api/hotspot/portal/
+// messages (services/backend/internal/hotspot/hotspot_portal_messages.go).
+export interface PortalMessage {
+  id: string;
+  title?: string;
+  body: string;
+  targetMac?: string;
+  urgent: boolean;
+  expiresAt?: string;
+  createdAt: string;
+}
