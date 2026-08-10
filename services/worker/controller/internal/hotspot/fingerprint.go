@@ -13,7 +13,13 @@ import (
 // o dnsmasq pra logar "log-dhcp" - unica forma de capturar as opcoes
 // DHCP que cada dispositivo pede (usadas pelo backend para heuristicas
 // locais de tipo/SO).
-const dnsmasqDHCPLog = "/tmp/bindnet-dnsmasq-dhcp.log"
+//
+// Mora em /var/log e nao em /tmp porque o kernel (fs.protected_regular)
+// recusa o dnsmasq reabrir um log de outro dono dentro de um diretorio
+// sticky world-writable - ver o comentario de DNSMASQ_DHCP_LOG em
+// services/worker/hotspot/entrypoint.sh. Os dois caminhos TEM que
+// continuar iguais.
+const dnsmasqDHCPLog = "/var/log/bindnet-dnsmasq-dhcp.log"
 
 func RegisterFingerprintRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /hotspot/fingerprint", handleHotspotFingerprint)

@@ -67,6 +67,7 @@ export function SetupHotspotStep({ initialData, onNext, onSkip }: SetupHotspotSt
           wifiInterfaces={wifiInterfaces}
           networkInterfaces={networkInterfaces}
           showActions={false}
+          showServiceTab={false}
         />
       </CardContent>
       <CardFooter className="justify-end gap-2 border-t pt-4">

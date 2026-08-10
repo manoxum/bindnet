@@ -228,13 +228,73 @@ Regras:
   rede (não à internet compartilhada por `INTERNET_INTERFACE`) no
   momento em que o hotspot sobe: se `iw phy<N> info` reportar a
   combinação `AP`+`managed`, o `create_ap` cria uma interface virtual
-  (`ap0`) e mantém a conexão de estação existente. Quando a interface
-  física não está associada como cliente Wi-Fi, o hotspot passa
-  `--no-virt` e usa a própria interface física em modo AP: uma virtual
-  não preservaria conexão alguma e alguns drivers/kernels (por exemplo,
-  `iwlwifi`/AX211 no kernel 7.0) deixam criar `ap0`, mas recusam com
-  `RTNETLINK ... Resource busy` a troca do MAC duplicado feita em
-  seguida pelo `create_ap`. Com uma estação ativa, o `create_ap`
+  (`ap0`) e mantém a conexão de estação existente.
+- **`WIFI_AP_MODE`** (`auto` — padrão — ou `virtual`) decide o que
+  acontece quando a interface física **não** está associada como cliente
+  Wi-Fi no momento do start:
+  - `auto`: o hotspot passa `--no-virt` e usa a própria interface física
+    em modo AP (comportamento histórico). Consequência importante: a
+    placa inteira vira AP, o `worker` a desgerencia no NetworkManager
+    (`unmanageWifiInterfaceIfIdle`) e ela **some do menu de rede do
+    sistema** até o hotspot parar — não há como ligar a máquina a uma
+    rede Wi-Fi enquanto isso.
+  - `virtual`: o AP sobe numa `ap0` mesmo sem associação a preservar, e
+    o `worker` **não** desgerencia a placa. O ganho não é preservar
+    conexão nenhuma (não há): é a placa física continuar em modo
+    `managed` e visível no sistema, permitindo conectar a máquina a uma
+    rede Wi-Fi **depois**, com o hotspot já no ar. Continua valendo
+    `#channels <= 1`: essa rede tem que estar no mesmo canal do AP.
+  - Esse modo só passou a ser viável com o patch de
+    `patch-create-ap.sh` (ver item abaixo): o motivo histórico de
+    preferir `--no-virt` com a placa ociosa era o `create_ap` morrer com
+    `RTNETLINK ... Resource busy` ao trocar a MAC da `ap0` recém-criada.
+  - O padrão continua `auto` para não mudar o comportamento de
+    instalações existentes sem o operador pedir.
+- **A troca de MAC da `ap0` acontece com ela desligada**
+  (`patch-create-ap.sh`). O `create_ap` do upstream cria a `ap0`, que
+  nasce com a **mesma** MAC da placa física, detecta a duplicata
+  (`get_all_macaddrs | grep -c` devolve 2) e gera uma MAC nova — mas
+  aplica essa MAC **antes** do `ip link set down` seguinte. O
+  `ieee80211_change_mac()` do mac80211 devolve `-EBUSY`
+  (`RTNETLINK answers: Resource busy`) para qualquer mudança de MAC numa
+  interface que esteja `UP`, e o `create_ap` morre com *"Maybe your WiFi
+  adapter does not fully support virtual interfaces"* — derrubando
+  **todo** o modo AP+STA (confirmado em `iwlwifi`/AX211, kernel 7.0). A
+  `ap0` chega `UP` porque o `create_ap` só a marca como `unmanaged` no
+  NetworkManager quando enxerga o NM vivo por D-Bus, e de dentro do
+  container isso não responde — o NM do host levanta a interface nova
+  sozinho. O patch move a atribuição para depois do `ip link set down`,
+  que é onde o próprio `create_ap` já a fazia no caminho `--no-virt`.
+  **Não** serve simplesmente pular a troca e deixar a `ap0` com a MAC da
+  placa: o mac80211 recusa MAC idêntica entre uma interface `AP` e uma
+  `managed` (`identical_mac_addr_allowed()` só libera monitor,
+  P2P-device e AP/AP-VLAN), devolvendo `-ENOTUNIQ` no lugar.
+- **A placa física é devolvida a `type managed` ao encerrar**
+  (`restore_physical_interface_type`, chamada por `cleanup()`, na subida
+  do script e antes de cada tentativa em `attempt_hotspot_cycle`). O
+  `create_ap` **não** restaura o tipo da interface ao sair de um
+  `--no-virt`, e uma placa presa em `type AP` quebra as duas coisas ao
+  mesmo tempo:
+  - a combinação suportada permite **uma única** interface AP
+    (`#{ AP, P2P-client, P2P-GO } <= 1`), então pedir a `ap0` virtual —
+    que também é AP — passa a pedir duas, e o firmware recusa com
+    `RTNETLINK answers: Resource busy`. Sem restaurar o tipo, o modo
+    virtual falha **para sempre**, em toda tentativa;
+  - `sta_link_probe` exige `type managed` para reconhecer uma
+    associação, então a placa presa em AP **nunca** parece associada e o
+    hotspot conclui "sem associação Wi-Fi cliente" mesmo com o usuário
+    conectado a uma rede.
+  Confirmado ao vivo (`iwlwifi`/AX211). A chamada em `cleanup()` é a
+  prevenção; as outras duas são a cura para o estado deixado por um
+  container morto por `SIGKILL` antes do `cleanup` rodar — mesma razão
+  de existir de `remove_stale_virtual_interfaces`, que faz o
+  equivalente para as `apN` órfãs.
+- Todo patch de `patch-create-ap.sh` casa linhas **literais** do
+  `create_ap` baixado do upstream. O script confere no fim se cada
+  âncora foi aplicada e **falha o build da imagem** se alguma sumiu —
+  sem isso, uma mudança no upstream faria o hotspot subir com
+  comportamento silenciosamente diferente do documentado aqui.
+- Com uma estação ativa, o `create_ap`
   **sobrescreve o canal/banda pedido pelo do rádio já associado**
   (a combinação normalmente vem com `#channels <= 1` — os dois modos
   têm que estar na mesma frequência; isso é decisão do próprio
@@ -245,6 +305,19 @@ Regras:
   usa contra a saída de `iw phy info` (`{` sem bound válido) e sempre
   falha, fazendo o hotspot concluir erroneamente, em qualquer
   adaptador, que o modo concorrente não é suportado.
+- **Ordem STA → AP é a única suportada num rádio único.**
+  `warn_ap_sta_channel_lock` (`radio_caps.sh`, chamada na subida) lê o
+  `#channels <= N` da combinação que inclui `AP` em `iw phy<N> info` e,
+  quando `N == 1`, loga que hotspot e Wi-Fi cliente **têm** que dividir
+  o mesmo canal. O hotspot já resolve isso travando o AP no canal da
+  estação — mas só nessa direção: com o AP no ar, associar a máquina a
+  uma rede Wi-Fi em outro canal não funciona, porque mover o AP depois
+  exigiria derrubar todos os clientes. Não existe seguidor de canal
+  automático, por decisão: a mesma nota aparece na aba "Interfaces" da
+  configuração no painel (`HotspotInterfacesTab.tsx`). O aviso vale para
+  qualquer cenário com estação preservada (inclusive Ethernet para
+  Wi-Fi), por isso roda fora de `warn_if_concurrent_ap_sta_risky`, que
+  só age quando `WIFI_INTERFACE == INTERNET_INTERFACE`.
 - **Wi-Fi para Wi-Fi com `WIFI_CHANNEL=auto`** (`WIFI_INTERFACE` ==
   `INTERNET_INTERFACE`, ver `attempt_hotspot_cycle`/`try_create_ap` em
   `entrypoint.sh`): se a placa já está associada como cliente Wi-Fi no
@@ -384,8 +457,11 @@ Regras:
     `reconcileHotspotOnce` detecta `"running": false"` e, se a última
     intenção do admin foi ligar (`POST /api/hotspot/start`, nunca
     desfeita por um `POST /api/hotspot/stop`), religa sozinho pelo
-    mesmo caminho de `autoStartHotspotOnBoot`. Uma parada deliberada
-    pelo painel nunca é desfeita por nenhuma das duas camadas.
+    mesmo `startHotspotAndReapply` que `AutoStartHotspotOnBoot` usa.
+    Uma parada deliberada pelo painel nunca é desfeita por nenhuma das
+    duas camadas. Esta camada **não** depende do interruptor de arranque
+    automático (ver seção própria abaixo): ele governa só o arranque do
+    backend, nunca a recuperação de uma queda.
 
 ## Ligar/desligar/recuperar o hotspot pelo painel (`POST /api/hotspot/start` / `/stop` / `/recover-wifi`)
 
@@ -442,6 +518,14 @@ scripts tinham, só que dentro do container privilegiado em vez de
      de NAT/forward a partir da interface real configurada.
 - `POST /api/hotspot/stop` desfaz exatamente o inverso, na ordem
   inversa:
+  0. **Grava a intenção `_DESIRED_STATE=stopped` antes de qualquer
+     chamada ao `worker`** (e falha com `500` sem tocar em nada se essa
+     gravação não der certo). A ordem importa: `recoverHotspotIfDesired`
+     (`hotspot_reconcile.go`, ciclo de 15s) religa qualquer hotspot que
+     encontre parado com a intenção ainda em `running`, então gravá-la
+     no fim — depois de um teardown que pode abortar — fazia um "parar"
+     malsucedido ser desfeito sozinho segundos depois. Era exatamente o
+     sintoma "parei e ele voltou".
   1. Para `hotspot` + `dns-provider` (`docker stop`, via `worker`) —
      internamente, o comando `stop` do `entrypoint.sh` sempre passa
      por `force_stop_create_ap` (mesma função usada por `cleanup()` na
@@ -458,6 +542,35 @@ scripts tinham, só que dentro do container privilegiado em vez de
      (`worker`: `POST /network/wifi-manage`, que roda `nmcli device set
      ... managed yes`). O container também remove `bn-uplink` e as
      chains `BINDNET-HOTSPOT` ao sair.
+  3. Desmonta isolamento de clientes, zonas `wan`/`local` do firewall e
+     reforço de DNS.
+  - **Os passos 1–3 são best-effort e nenhum deles aborta os
+    seguintes** (`stopHotspotAndTeardown` em
+    `services/backend/internal/hotspot/hotspot_network.go`): as falhas
+    são acumuladas e a resposta é `502` listando todas, mas o teardown
+    corre inteiro. Antes, um erro no passo 1 fazia `return` imediato e a
+    placa Wi-Fi nunca era devolvida ao NetworkManager — ela sumia do
+    menu de rede do sistema até alguém clicar em "Recuperar Wi-Fi". O
+    pior estado aceitável é um hotspot que não morreu; nunca uma placa
+    sequestrada.
+  - **Contexto próprio, não o da requisição**
+    (`detachedHotspotContext`, mesmo arquivo): `start`, `stop`, `apply`
+    e `recover-wifi` derrubam a rede de quem as pediu — o painel é
+    operado também do celular conectado **pelo próprio hotspot**. Com
+    `r.Context()`, o Go cancelava o contexto no instante em que o AP
+    caía e tudo que viesse depois (gravar a intenção, `wifi-manage`,
+    desmontar chains) falhava com `context canceled`.
+  - **Timeout do cliente do `worker`**: essas quatro rotas usam
+    `workerapi.Client.Slow()` (90s) em vez do cliente padrão (15s). O
+    `stop_service` do `entrypoint.sh` espera até 30s pelo `SIGTERM` do
+    runner e depois gasta até mais 15s em `force_stop_create_ap`, ou
+    seja, estoura os 15s por desenho — o painel reportava
+    `Post "http://worker/hotspot/stop": context deadline exceeded
+    (Client.Timeout exceeded while awaiting headers)` e tratava como
+    "não parou" um hotspot que tinha parado. Precisa ser um cliente
+    separado (e não um contexto com prazo maior): `http.Client.Timeout`
+    vale junto com o contexto da requisição, então o contexto só
+    consegue **encurtar** o prazo, nunca alargar.
 - `POST /api/hotspot/recover-wifi` é a ação operacional do botão
   "Recuperar Wi-Fi" na tela "Hotspot Wi-Fi": derruba/para o hotspot em
   execução (mesmo caminho de `POST /api/hotspot/stop`, incluindo o
@@ -475,19 +588,48 @@ scripts tinham, só que dentro do container privilegiado em vez de
   fluxo suportado é iniciar/parar pelo painel; "Recuperar Wi-Fi" fica
   como ação segura para limpar estados antigos ou interrupções fora do
   fluxo normal.
-- `POST /api/hotspot/start`/`stop` também gravam a última intenção do
-  admin (chave interna `_DESIRED_STATE` em `hotspot_config`, fora da
-  allowlist de `GET`/`PATCH /api/hotspot/config` — ver
-  `hotspotDesiredStateKey` em `services/backend/hotspot_config_store.go`).
-  Ao subir, o backend chama `autoStartHotspotOnBoot`
-  (`services/backend/hotspot_autostart.go`, goroutine iniciada em
-  `main.go`): se a última intenção foi "ligado" e o hotspot não está
-  rodando, ele religa sozinho (com retry curto, já que o
-  worker/container do hotspot podem demorar a ficar prontos logo após
-  o backend subir) — sem isso, o container do hotspot sempre volta em
-  modo "manager" (ocioso) após qualquer restart do container/reboot da
-  máquina, exigindo clique manual do admin mesmo que o hotspot
-  estivesse ligado antes.
+- `POST /api/hotspot/start`/`stop`/`recover-wifi` gravam a última
+  intenção do admin (chave interna `_DESIRED_STATE` em `hotspot_config`,
+  fora da allowlist de `GET`/`PATCH /api/hotspot/config` — ver
+  `hotspotDesiredStateKey` em `hotspot_config_state.go`). Ela governa a
+  **auto-recuperação de queda**: `recoverHotspotIfDesired`
+  (`hotspot_reconcile.go`) só religa um hotspot caído se a última
+  intenção foi "ligado". Uma parada deliberada nunca é desfeita.
+
+## Arranque automático do hotspot (`GET`/`PATCH /api/hotspot/autostart`)
+
+- Interruptor **explícito** no painel ("Iniciar automaticamente no
+  arranque", aba **Serviço** de "Alterar configuração" —
+  `services/frontend/src/components/hotspot/HotspotServiceTab.tsx`),
+  gravado na chave interna `_AUTOSTART` de `hotspot_config` — também
+  fora da allowlist de `GET`/`PATCH /api/hotspot/config`, e por isso em
+  **rota própria**.
+- Apesar de ficar dentro do formulário de configuração, o interruptor
+  **não** faz parte do "Salvar e aplicar": grava sozinho, na hora, pela
+  sua própria rota. Salvar o formulário dispara `POST /hotspot/apply`,
+  que reinicia o hotspot e derruba todos os clientes conectados —
+  mudar uma preferência de arranque nunca deve custar isso. A aba é
+  escondida no assistente de configuração inicial
+  (`showServiceTab={false}` em `SetupHotspotStep.tsx`), que só grava
+  tudo no último passo.
+- **Padrão `false`** (não sobe sozinho). Deliberado: nenhum arranque de
+  backend (deploy, `docker compose up`, crash) deve ressuscitar um
+  hotspot que o operador parou de propósito sem ele ter pedido isso.
+- Ao subir, o backend chama `AutoStartHotspotOnBoot`
+  (`hotspot_autostart.go`, goroutine iniciada em `main.go`). Com o
+  interruptor **ligado**, ele sobe o hotspot **sempre**, sem consultar
+  `_DESIRED_STATE` — "auto-start sim" tem que ser previsível, e um
+  hotspot que não volta depois de uma falta de luz só porque estava
+  parado naquele instante seria exatamente a surpresa que o interruptor
+  existe para eliminar. Grava `_DESIRED_STATE=running` junto, para que a
+  auto-recuperação de queda mantenha o hotspot de pé em seguida. Retry
+  curto, já que o worker/container do hotspot podem demorar a ficar
+  prontos logo após o backend subir.
+- O interruptor governa **apenas o arranque**. A auto-recuperação de
+  queda (watchdog de beacon → `recoverHotspotIfDesired`) fica sempre
+  ligada e continua governada só por `_DESIRED_STATE`: ela existe para
+  consertar uma falha de driver, não para desfazer uma decisão do
+  operador.
 
 ## Clientes do hotspot: identificação e bloqueio por MAC (`services/backend/hotspot_devices.go`)
 
@@ -500,11 +642,21 @@ scripts tinham, só que dentro do container privilegiado em vez de
 - `POST /api/hotspot/clients/{mac}/identify` dispara a identificação:
   1. Busca o fingerprint DHCP do dispositivo (opções pedidas + vendor
      class) via `worker`: `GET /hotspot/fingerprint` — lê
-     `/tmp/bindnet-dnsmasq-dhcp.log`, caminho fixo que
+     `/var/log/bindnet-dnsmasq-dhcp.log`, caminho fixo que
      `services/worker/hotspot/patch-create-ap.sh` força no
      `dnsmasq.conf` gerado pelo `create_ap` (`log-dhcp` +
      `log-facility`), já que o `CONFDIR` original tem sufixo aleatório
-     por execução.
+     por execução. **`/var/log` e não `/tmp`**: com
+     `fs.protected_regular` ligado no kernel do host (=2 no Ubuntu
+     atual), abrir com `O_CREAT` um arquivo pertencente a outro usuário
+     dentro de um diretório *sticky* e world-writable (`/tmp`, modo
+     1777) devolve `EACCES`. O `dnsmasq` abre este log como root e em
+     seguida faz `fchown` para o próprio usuário `dnsmasq` — então a
+     primeira execução funcionava e **toda execução seguinte** morria
+     com `dnsmasq: cannot open log ...: Permission denied`, derrubando
+     o `create_ap` inteiro antes de servir DHCP. O caminho tem que
+     continuar igual em `entrypoint.sh` (`DNSMASQ_DHCP_LOG`),
+     `patch-create-ap.sh` e `fingerprint.go` (`dnsmasqDHCPLog`).
   2. Descobre o fabricante via `api.macvendors.com` (MAC → nome do
      fabricante); se a chamada externa falhar ou não tiver rede, cai
      para uma base OUI local (`BINDNET_OUI_DB_PATH`, opcional) e por

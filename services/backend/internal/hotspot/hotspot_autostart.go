@@ -11,13 +11,20 @@ import (
 	"time"
 )
 
-// AutoStartHotspotOnBoot religa o hotspot sozinho quando o backend
-// sobe (container recriado, ou reboot da maquina), mas so se a ultima
-// intencao do admin (POST /api/hotspot/start ou /stop) foi ligar - ver
-// store.HotspotDesiredStateRunning em hotspot_config_store.go. Sem isso, o
-// container do hotspot sobe em modo "manager" e fica ocioso ate
-// alguem clicar em "Iniciar" no painel de novo, mesmo que o hotspot
-// estivesse ligado antes do restart.
+// AutoStartHotspotOnBoot sobe o hotspot sozinho quando o backend
+// arranca (container recriado, ou reboot da maquina), mas so quando o
+// operador ligou o interruptor "iniciar automaticamente no arranque"
+// no painel - ver store.HotspotAutostartEnabled em
+// hotspot_config_state.go e as rotas em hotspot_autostart_routes.go.
+// Sem isso, o container do hotspot sobe em modo "manager" e fica
+// ocioso ate alguem clicar em "Iniciar" no painel de novo.
+//
+// Interruptor LIGADO significa subir SEMPRE, sem consultar a ultima
+// intencao do admin (store.HotspotDesiredStateRunning): "auto-start
+// sim" tem que ser previsivel, e um hotspot que nao volta depois de
+// uma falta de luz so porque estava parado naquele instante seria
+// exatamente a surpresa que o interruptor existe pra eliminar. Quem
+// nao quer isso poe o interruptor em "nao" (o padrao).
 //
 // Roda em goroutine de fundo (chamada assim em main.go) com retry
 // curto: o worker/container do hotspot podem demorar alguns segundos
@@ -25,13 +32,21 @@ import (
 func AutoStartHotspotOnBoot(db *sql.DB, worker *workerapi.Client, audit *audit.Client) {
 	ctx := context.Background()
 
-	desired, err := store.HotspotDesiredStateRunning(ctx, db)
+	enabled, err := store.HotspotAutostartEnabled(ctx, db)
 	if err != nil {
-		log.Printf("[backend] autostart do hotspot: falha ao ler estado desejado: %v", err)
+		log.Printf("[backend] autostart do hotspot: falha ao ler o interruptor de arranque automatico: %v", err)
 		return
 	}
-	if !desired {
+	if !enabled {
 		return
+	}
+
+	// Grava a intencao antes de tentar: e ela que faz a reconciliacao
+	// (recoverHotspotIfDesired) manter o hotspot de pe se ele cair
+	// depois, e tambem o que faz as tentativas abaixo continuarem
+	// valendo caso o backend reinicie no meio delas.
+	if err := store.SetHotspotDesiredState(ctx, db, true); err != nil {
+		log.Printf("[backend] autostart do hotspot: falha ao gravar estado desejado (ligado): %v", err)
 	}
 
 	var lastErr error
@@ -74,13 +89,12 @@ func AutoStartHotspotOnBoot(db *sql.DB, worker *workerapi.Client, audit *audit.C
 // services/worker/hotspot/watchdog.sh) com o admin ainda querendo ele
 // ligado.
 func startHotspotAndReapply(ctx context.Context, db *sql.DB, worker *workerapi.Client, audit *audit.Client, iface, username string) error {
-	if err := startHotspotRuntimeConfig(ctx, db, worker); err != nil {
+	// Cliente lento: subir o AP passa pelo mesmo caminho demorado do
+	// painel (ver slowTimeout em internal/workerapi/client.go).
+	if err := startHotspotRuntimeConfig(ctx, db, worker.Slow()); err != nil {
 		return err
 	}
-	reapplyHotspotBlocklist(ctx, db, worker, iface)
-	reapplyHotspotShaping(ctx, worker, iface)
-	reapplyHotspotIsolation(ctx, db, worker)
-	reapplyHotspotFirewall(ctx, db, worker)
+	reapplyHotspotRules(ctx, db, worker, iface)
 	audit.Record(ctx, "hotspot_started", username, nil)
 	return nil
 }

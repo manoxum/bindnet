@@ -7,6 +7,7 @@ import { HotspotInterfacesTab } from "@/components/hotspot/HotspotInterfacesTab"
 import { HotspotRadioTab } from "@/components/hotspot/HotspotRadioTab";
 import { HotspotNetworkTab } from "@/components/hotspot/HotspotNetworkTab";
 import { HotspotUplinkTab } from "@/components/hotspot/HotspotUplinkTab";
+import { HotspotServiceTab } from "@/components/hotspot/HotspotServiceTab";
 
 interface NetworkInterface {
   name: string;
@@ -31,6 +32,12 @@ interface HotspotConfigFormProps {
   // false esconde o botão Salvar e aplicar - usado pelo assistente de
   // configuração inicial, que só salva/aplica tudo no último passo.
   showActions?: boolean;
+  // false esconde a aba "Serviço" - o assistente de configuração
+  // inicial só grava tudo no fim, e o interruptor de arranque
+  // automático dessa aba grava sozinho, na hora (ver
+  // HotspotServiceTab): misturar os dois ali confundiria o passo a
+  // passo.
+  showServiceTab?: boolean;
 }
 
 // Formulário de configuração do hotspot, separado em abas (uma por
@@ -50,16 +57,18 @@ export function HotspotConfigForm({
   wifiInterfaces,
   networkInterfaces,
   showActions = true,
+  showServiceTab = true,
 }: HotspotConfigFormProps) {
   return (
     <form className="space-y-5" onSubmit={handleSubmit(onSave)}>
       <Tabs defaultValue="wifi" className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-5">
+        <TabsList className={`grid h-auto w-full grid-cols-2 gap-1 ${showServiceTab ? "sm:grid-cols-6" : "sm:grid-cols-5"}`}>
           <TabsTrigger value="wifi">Wi-Fi</TabsTrigger>
           <TabsTrigger value="interfaces">Interfaces</TabsTrigger>
           <TabsTrigger value="radio">Rádio</TabsTrigger>
           <TabsTrigger value="network">Rede</TabsTrigger>
           <TabsTrigger value="uplink">Uplink</TabsTrigger>
+          {showServiceTab && <TabsTrigger value="service">Serviço</TabsTrigger>}
         </TabsList>
 
         <HotspotWifiTab
@@ -78,6 +87,7 @@ export function HotspotConfigForm({
         <HotspotRadioTab register={register} />
         <HotspotNetworkTab register={register} errors={errors} />
         <HotspotUplinkTab register={register} errors={errors} />
+        {showServiceTab && <HotspotServiceTab />}
       </Tabs>
 
       {showActions && (

@@ -51,7 +51,28 @@ export function HotspotInterfacesTab({ register, wifiInterfaces, networkInterfac
               ))}
             </SelectNative>
           </div>
+          <div className="space-y-2 sm:col-span-2">
+            <Label htmlFor="WIFI_AP_MODE">Modo da placa Wi-Fi</Label>
+            <SelectNative id="WIFI_AP_MODE" {...register("WIFI_AP_MODE")}>
+              <option value="auto">Automático — placa dedicada quando não há Wi-Fi ligado</option>
+              <option value="virtual">Virtual — manter sempre a placa disponível no sistema</option>
+            </SelectNative>
+            <p className="text-xs text-muted-foreground">
+              Em <strong>Automático</strong>, se a máquina não estiver ligada a nenhuma rede Wi-Fi quando o hotspot
+              arranca, o AP toma a placa inteira e ela desaparece do menu de rede até o hotspot parar. Em{" "}
+              <strong>Virtual</strong>, o AP sobe numa interface separada (<code>ap0</code>) e a placa continua
+              gerida pelo sistema, dando para ligar-se a uma rede Wi-Fi depois — desde que ela esteja no mesmo canal
+              do hotspot.
+            </p>
+          </div>
         </div>
+        <p className="rounded-lg border border-border/60 bg-muted/30 p-3 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Ordem importa nesta máquina.</span> Para manter a conexão
+          Wi-Fi cliente ligada com o hotspot no ar, ligue-se à rede Wi-Fi <em>antes</em> de iniciar o hotspot: um
+          rádio único só transmite numa frequência por vez, então o AP é travado no canal da estação. Com o hotspot
+          já no ar, a máquina só consegue associar-se a redes que estejam nesse mesmo canal. O log do hotspot mostra
+          se a placa aceita mais de um canal simultâneo.
+        </p>
       </fieldset>
     </TabsContent>
   );

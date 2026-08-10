@@ -18,6 +18,7 @@ var hotspotConfigKeys = []string{
 	"WIFI_CHANNEL",
 	"WIFI_FREQ_BAND",
 	"WIFI_CHANNEL_CANDIDATES",
+	"WIFI_AP_MODE",
 	"HOTSPOT_GATEWAY",
 	"HOTSPOT_CIDR",
 	"HOTSPOT_DNS_FALLBACKS",
@@ -34,6 +35,14 @@ var hotspotConfigDefaults = map[string]string{
 	"WIFI_COUNTRY":             "ST",
 	"WIFI_CHANNEL":             "auto",
 	"WIFI_FREQ_BAND":           "auto",
+	// WIFI_AP_MODE decide se o AP sobe numa interface virtual (ap0) ou
+	// toma a placa fisica inteira (--no-virt). "auto" mantem o
+	// comportamento historico: virtual so quando ja existe uma
+	// associacao Wi-Fi cliente a preservar. "virtual" forca a ap0
+	// sempre, deixando a placa fisica gerenciada pelo NetworkManager e
+	// visivel no menu de rede do sistema - ver try_create_ap em
+	// services/worker/hotspot/entrypoint.sh e RULE.md.
+	"WIFI_AP_MODE": "auto",
 	"HOTSPOT_GATEWAY":          "192.168.12.1",
 	"HOTSPOT_CIDR":             "192.168.12.0/24",
 	"HOTSPOT_DNS_FALLBACKS":    "1.1.1.1,8.8.8.8",
@@ -128,6 +137,9 @@ func SaveHotspotConfig(ctx context.Context, db *sql.DB, values map[string]string
 	}
 	if isolation, ok := clean["CLIENT_ISOLATION"]; ok && isolation != "true" && isolation != "false" {
 		return errors.New("CLIENT_ISOLATION deve ser 'true' ou 'false'")
+	}
+	if mode, ok := clean["WIFI_AP_MODE"]; ok && mode != "auto" && mode != "virtual" {
+		return errors.New("WIFI_AP_MODE deve ser 'auto' ou 'virtual'")
 	}
 	for _, key := range []string{"FW_WAN_POLICY", "FW_LOCAL_POLICY"} {
 		if policy, ok := clean[key]; ok && policy != "allow" && policy != "deny" {

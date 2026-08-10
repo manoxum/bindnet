@@ -8,7 +8,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 )
@@ -47,109 +46,6 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(interfaces)
-	}))
-
-	mux.HandleFunc("POST /api/hotspot/apply", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		if err := applyHotspotRuntimeConfig(r.Context(), db, worker); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		iface, err := currentHotspotInterface(r.Context(), db)
-		if err == nil {
-			reapplyHotspotBlocklist(r.Context(), db, worker, iface)
-			reapplyHotspotShaping(r.Context(), worker, iface)
-			reapplyHotspotIsolation(r.Context(), db, worker)
-			reapplyHotspotFirewall(r.Context(), db, worker)
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	mux.HandleFunc("POST /api/hotspot/start", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		iface, err := currentHotspotInterface(r.Context(), db)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		// O worker desgerencia a placa fisica no NetworkManager (quando
-		// nao ha STA associada) internamente, bem em cima do "docker exec
-		// ... start" - ver unmanageWifiInterfaceIfIdle em
-		// services/worker/controller/compose.go. Fazer essa checagem
-		// aqui tambem, bem mais cedo, so alargava a janela entre a
-		// checagem e a tentativa real do create_ap (o hotspot ainda leva
-		// alguns segundos pra rodar de fato: ensureHotspotContainer,
-		// restart do dns-provider, espera do banco), dando tempo de sobra
-		// pra uma associacao Wi-Fi marginal cair entre as duas.
-		// O container do hotspot fica vivo; ligar/desligar controla apenas o
-		// servico AP interno. A configuracao operacional e lida pelo proprio
-		// hotspot na tabela hotspot_config, no momento do start/restart.
-		if err := startHotspotRuntimeConfig(r.Context(), db, worker); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		reapplyHotspotBlocklist(r.Context(), db, worker, iface)
-		reapplyHotspotShaping(r.Context(), worker, iface)
-		reapplyHotspotIsolation(r.Context(), db, worker)
-		reapplyHotspotFirewall(r.Context(), db, worker)
-		if err := store.SetHotspotDesiredState(r.Context(), db, true); err != nil {
-			log.Printf("[backend] falha ao gravar estado desejado do hotspot (ligado): %v", err)
-		}
-		username, _ := auth.SessionUser(r, admin)
-		audit.Record(r.Context(), "hotspot_started", username, nil)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	mux.HandleFunc("POST /api/hotspot/stop", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		iface, ifaceErr := currentHotspotInterface(r.Context(), db)
-		if err := stopHotspotService(r.Context(), worker); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		if ifaceErr == nil {
-			// wifi-manage e idempotente (ver handleWifiManage no worker)
-			// mesmo quando o /start anterior nao chegou a desgerenciar a
-			// placa (cenario AP+STA, ver unmanageWifiInterfaceIfIdle em
-			// services/worker/controller/compose.go) - chamar sempre aqui
-			// garante que a placa nunca fique presa "unmanaged" no
-			// NetworkManager depois que o hotspot para.
-			if err := worker.Call(r.Context(), http.MethodPost, "/network/wifi-manage", map[string]string{"interface": iface}, nil); err != nil {
-				log.Printf("[backend] aviso: falha ao devolver %s ao NetworkManager: %v", iface, err)
-			}
-			// Desmonta o chain/sysctls do isolamento junto com o hotspot -
-			// higiene, igual ao teardown do shaping: nada disso deve
-			// sobreviver com o AP parado.
-			if err := teardownIsolationWorker(r.Context(), worker, iface); err != nil {
-				log.Printf("[backend] aviso: falha ao desmontar isolamento de clientes: %v", err)
-			}
-			// Idem para as zonas wan/local do firewall.
-			if err := teardownFirewallWorker(r.Context(), worker, iface); err != nil {
-				log.Printf("[backend] aviso: falha ao desmontar firewall (wan/local): %v", err)
-			}
-			// Idem para o reforco de DNS (forcar :53 + DoH/DoT).
-			if err := teardownDNSForceWorker(r.Context(), worker, iface); err != nil {
-				log.Printf("[backend] aviso: falha ao desmontar reforco de DNS: %v", err)
-			}
-		}
-		if err := store.SetHotspotDesiredState(r.Context(), db, false); err != nil {
-			log.Printf("[backend] falha ao gravar estado desejado do hotspot (parado): %v", err)
-		}
-		username, _ := auth.SessionUser(r, admin)
-		audit.Record(r.Context(), "hotspot_stopped", username, nil)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	mux.HandleFunc("POST /api/hotspot/recover-wifi", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		iface, err := currentHotspotInterface(r.Context(), db)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := recoverWifiAdapter(r.Context(), worker, iface); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		username, _ := auth.SessionUser(r, admin)
-		audit.Record(r.Context(), "wifi_adapter_recovered", username, map[string]any{"interface": iface})
-		w.WriteHeader(http.StatusNoContent)
 	}))
 
 	mux.HandleFunc("GET /api/hotspot/status", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
@@ -197,8 +93,10 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 		_ = json.NewEncoder(w).Encode(clients)
 	}))
 
+	RegisterHotspotLifecycleRoutes(mux, worker, admin, audit, db)
 	RegisterHotspotLogsRoutes(mux, worker, admin, audit, db)
 	RegisterHotspotUplinkRoute(mux, admin, audit, db)
+	RegisterHotspotAutostartRoutes(mux, admin, audit, db)
 }
 
 func applyHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerapi.Client) error {

@@ -13,11 +13,31 @@ import (
 	"time"
 )
 
+// defaultTimeout cobre a esmagadora maioria das rotas do worker, que
+// so leem estado (status, interfaces, clientes) ou aplicam uma regra
+// idempotente de iptables/tc.
+const defaultTimeout = 15 * time.Second
+
+// slowTimeout e pras rotas de ciclo de vida do hotspot
+// (/hotspot/start, /hotspot/stop, /hotspot/apply), que passam por
+// stop_service em services/worker/hotspot/entrypoint.sh: ele espera ate
+// 30s pelo SIGTERM do runner e depois gasta ate mais 15s em
+// force_stop_create_ap, ou seja, estoura defaultTimeout por desenho.
+// Com os 15s valia o erro real observado no painel:
+//
+//	Post "http://worker/hotspot/stop": context deadline exceeded
+//	(Client.Timeout exceeded while awaiting headers)
+//
+// que o handler tratava como "o hotspot nao parou" mesmo quando ele
+// tinha parado - ver POST /api/hotspot/stop em hotspot.go.
+const slowTimeout = 90 * time.Second
+
 // Client fala com o services/worker atraves do socket Unix
 // compartilhado (worker_ipc) - o backend nunca acessa docker.sock,
 // NetworkManager ou network_mode: host diretamente.
 type Client struct {
-	http *http.Client
+	http      *http.Client
+	transport *http.Transport
 }
 
 func New(socketPath string) *Client {
@@ -27,7 +47,22 @@ func New(socketPath string) *Client {
 			return d.DialContext(ctx, "unix", socketPath)
 		},
 	}
-	return &Client{http: &http.Client{Transport: transport, Timeout: 15 * time.Second}}
+	return &Client{
+		http:      &http.Client{Transport: transport, Timeout: defaultTimeout},
+		transport: transport,
+	}
+}
+
+// Slow devolve um cliente irmao (mesmo socket, mesmo transporte, mesmas
+// conexoes reaproveitadas) com slowTimeout no lugar de defaultTimeout.
+// Precisa ser um cliente separado, e nao um contexto com prazo maior no
+// Call: http.Client.Timeout e por cliente e vale junto com o contexto do
+// pedido, entao o contexto so consegue ENCURTAR o prazo, nunca alargar.
+func (c *Client) Slow() *Client {
+	return &Client{
+		http:      &http.Client{Transport: c.transport, Timeout: slowTimeout},
+		transport: c.transport,
+	}
 }
 
 // call faz uma requisicao para a API interna do worker e decodifica a

@@ -1,22 +1,8 @@
 import { lazy, Suspense } from "react";
-import {
-  Flag,
-  Globe,
-  Hash,
-  Lock,
-  Play,
-  RefreshCw,
-  Router,
-  Settings2,
-  Square,
-  Unlock,
-  Waves,
-  Wifi,
-  type LucideIcon,
-} from "lucide-react";
+import { Flag, Globe, Hash, Lock, Router, Unlock, Waves, Wifi, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { HotspotSummaryActions } from "@/components/hotspot/HotspotSummaryActions";
 import { HotspotWifiQr } from "@/components/hotspot/HotspotWifiQr";
 import {
   HotspotInterfaceQuickSwitch,
@@ -119,29 +105,16 @@ export function HotspotSummaryCard({
           </div>
           <Badge variant={running ? "success" : "secondary"}>{running ? "ligado" : "desligado"}</Badge>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={onStart} disabled={running || startPending || recoverPending}>
-            <Play className="h-4 w-4" />
-            Iniciar
-          </Button>
-          <Button size="sm" variant="destructive" onClick={onStop} disabled={!running || stopPending || recoverPending}>
-            <Square className="h-4 w-4" />
-            Parar
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={onRecover}
-            disabled={recoverPending || startPending || stopPending}
-          >
-            <RefreshCw className={recoverPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-            Recuperar Wi-Fi
-          </Button>
-          <Button variant="outline" size="sm" onClick={onEdit}>
-            <Settings2 className="h-4 w-4" />
-            Alterar configuração
-          </Button>
-        </div>
+        <HotspotSummaryActions
+          running={running}
+          startPending={startPending}
+          stopPending={stopPending}
+          recoverPending={recoverPending}
+          onStart={onStart}
+          onStop={onStop}
+          onRecover={onRecover}
+          onEdit={onEdit}
+        />
       </CardHeader>
       <CardContent className="flex flex-col gap-4 pt-5 lg:flex-row lg:items-stretch lg:justify-between">
         {ssid && (open || password) && <HotspotWifiQr ssid={ssid} password={password} open={open} />}

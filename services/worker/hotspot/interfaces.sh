@@ -133,32 +133,6 @@ best_internet_interface() {
   ranked_internet_candidates | head -n 1
 }
 
-# warn_if_concurrent_ap_sta_risky avisa cedo quando WIFI_INTERFACE e
-# INTERNET_INTERFACE sao a mesma placa fisica (hotspot + internet no
-# mesmo radio, modo AP+STA concorrente). Nunca bloqueia: quem decide se
-# funciona de fato e o proprio create_ap, mesma filosofia ja usada para
-# canal/banda ("o hotspot nunca trava por falta de varredura").
-warn_if_concurrent_ap_sta_risky() {
-  if [[ "${WIFI_INTERFACE}" != "${REAL_INTERNET_INTERFACE}" ]]; then
-    return
-  fi
-
-  log "AVISO: WIFI_INTERFACE e INTERNET_INTERFACE sao a mesma placa (${WIFI_INTERFACE}) - modo AP+STA concorrente no mesmo radio, requer suporte do driver/chipset; o create_ap decide se funciona de fato."
-
-  local phy
-  phy="$(interface_phy)"
-  if [[ -z "${phy}" ]]; then
-    log "AVISO: nao foi possivel identificar o phy de ${WIFI_INTERFACE} para checar combinacoes suportadas."
-    return
-  fi
-
-  if iw "phy${phy}" info 2>/dev/null | grep -A5 'valid interface combinations' | grep -qi 'AP.*managed\|managed.*AP'; then
-    log "Placa ${WIFI_INTERFACE} (phy${phy}) reporta suporte a AP+managed simultaneos."
-  else
-    log "AVISO: 'iw phy${phy} info' nao reporta uma combinacao AP+managed simultanea; o create_ap pode falhar ao tentar hotspot+internet na mesma placa."
-  fi
-}
-
 validate_real_internet_interface() {
   if [[ -z "${REAL_INTERNET_INTERFACE}" ]]; then
     log "ERRO: nenhuma interface real de internet foi resolvida."

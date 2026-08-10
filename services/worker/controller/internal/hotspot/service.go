@@ -68,7 +68,7 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 			// discordarem - foi exatamente essa janela que expos o bug do
 			// NetworkManager brigando pela placa com o hostapd (ver
 			// unmanageWifiInterface em internal/network).
-			unmanageWifiInterfaceIfIdle(config["WIFI_INTERFACE"], config["INTERNET_INTERFACE"])
+			unmanageWifiInterfaceIfIdle(config["WIFI_INTERFACE"], config["INTERNET_INTERFACE"], config["WIFI_AP_MODE"])
 		}
 
 		output, err := compose.ExecHotspotEntrypoint(action)
@@ -105,11 +105,19 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 //     funcionando e visivel no NetworkManager, so nao e usado como uplink
 //     do hotspot.
 //
-//   - Placas diferentes SEM associacao: desgerencia/desconecta como antes -
-//     o AP vai subir em --no-virt na placa fisica inteira, e deixa-la
-//     gerenciada faria o NetworkManager escanear/tentar (re)associar essa
-//     mesma placa enquanto o hostapd mantem o AP nela, derrubando o beacon
-//     ("Failed to set beacon parameters"/"key not allowed", ver Dockerfile).
+//   - apMode == "virtual": a placa fica gerenciada INDEPENDENTE de haver
+//     associacao agora. Nesse modo o entrypoint sobe o AP numa ap0 mesmo
+//     com a placa ociosa (ver try_create_ap), e o proposito inteiro do
+//     modo e justamente deixar a placa fisica disponivel no
+//     NetworkManager pra conectar a uma rede Wi-Fi DEPOIS - desgerencia-la
+//     aqui anularia isso, deixando-a sumida do menu de rede do sistema.
+//
+//   - Placas diferentes SEM associacao (e apMode "auto"): desgerencia/
+//     desconecta como antes - o AP vai subir em --no-virt na placa fisica
+//     inteira, e deixa-la gerenciada faria o NetworkManager escanear/tentar
+//     (re)associar essa mesma placa enquanto o hostapd mantem o AP nela,
+//     derrubando o beacon ("Failed to set beacon parameters"/"key not
+//     allowed", ver Dockerfile).
 //
 // Corrida residual: a associacao pode cair entre esta checagem e o primeiro
 // try_create_ap (segundos). Nesse caso o AP sobe --no-virt com a placa
@@ -117,11 +125,11 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 // houver briga, e o NetworkManager reassociando devolve o caminho
 // preservado na tentativa seguinte. Falha/ausencia de iface nunca bloqueia
 // o start.
-func unmanageWifiInterfaceIfIdle(wifiInterface, internetInterface string) {
+func unmanageWifiInterfaceIfIdle(wifiInterface, internetInterface, apMode string) {
 	if wifiInterface == "" {
 		return
 	}
-	if wifiInterface == internetInterface || network.InterfaceAssociated(wifiInterface) {
+	if wifiInterface == internetInterface || apMode == "virtual" || network.InterfaceAssociated(wifiInterface) {
 		if err := network.ManageWifiInterface(wifiInterface); err != nil {
 			log.Printf("[worker] aviso: falha ao garantir %s gerenciada no NetworkManager: %v", wifiInterface, err)
 		} else {

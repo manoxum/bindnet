@@ -11,10 +11,27 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
 const composeProjectName = "bindnet"
+
+// lifecycleMutex serializa TODA operacao de ciclo de vida de container
+// (up/stop/exec do hotspot). O worker e o unico ponto por onde passam o
+// painel, o autostart de boot e o laco de reconciliacao do backend -
+// entao e aqui, e so aqui, que da pra impedir que dois deles mexam no
+// mesmo servico ao mesmo tempo.
+//
+// Sem isso: um "docker compose up -d" que precisa RECRIAR o container
+// (ex.: imagem nova) leva dezenas de segundos, porque parar o hotspot
+// respeita o stop_grace_period de 30s do docker-compose.services.yml.
+// Nessa janela, reconcileHotspotOnce (ciclo de 15s no backend) enxerga o
+// hotspot parado com _DESIRED_STATE=running e dispara o proprio start
+// por cima. O Docker recusa o segundo com "removal of container ... is
+// already in progress" e, pior, deixa o container antigo renomeado para
+// "<id>_bindnet-hotspot-1" - zumbis que se acumulam a cada tentativa.
+var lifecycleMutex sync.Mutex
 
 // ApplyServicesHandler recria os containers informados via "docker compose
 // up". Os servicos leem a configuracao operacional diretamente do banco
@@ -31,6 +48,9 @@ func ApplyServicesHandler(services []string) http.HandlerFunc {
 }
 
 func EnsureHotspotContainer() error {
+	lifecycleMutex.Lock()
+	defer lifecycleMutex.Unlock()
+
 	output, err := exec.Command("docker", composeArgs("up", "-d", "--no-build", "--no-deps", "hotspot")...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
@@ -45,7 +65,13 @@ func EnsureHotspotContainer() error {
 	return fmt.Errorf("container hotspot nao ficou em execucao")
 }
 
+// ExecHotspotEntrypoint entra na mesma fila de EnsureHotspotContainer:
+// um "stop" chegando no meio de uma recriacao (ou vice-versa) e a mesma
+// corrida, so que com o container trocando de baixo do exec.
 func ExecHotspotEntrypoint(action string) ([]byte, error) {
+	lifecycleMutex.Lock()
+	defer lifecycleMutex.Unlock()
+
 	containerID, running, err := ServiceContainerRunning("hotspot")
 	if err != nil {
 		return nil, err
@@ -71,7 +97,13 @@ func ServiceContainerRunning(service string) (string, bool, error) {
 	return containerID, strings.TrimSpace(string(output)) == "true", nil
 }
 
+// ApplyServices entra na mesma fila: o /hotspot/start reinicia o
+// dns-provider por aqui logo antes de subir o hotspot, entao duas
+// chamadas concorrentes de start colidiriam neste "up" tambem.
 func ApplyServices(services []string) error {
+	lifecycleMutex.Lock()
+	defer lifecycleMutex.Unlock()
+
 	args := composeArgs(append([]string{"up", "-d", "--no-build", "--no-deps"}, services...)...)
 	output, err := exec.Command("docker", args...).CombinedOutput()
 	if err != nil {

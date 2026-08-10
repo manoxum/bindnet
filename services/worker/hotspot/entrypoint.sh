@@ -64,6 +64,7 @@ load_runtime_config_from_db() {
   BINDNET_UPLINK_INTERFACE="bn-uplink"
   UPLINK_MONITOR_INTERVAL="10"
   CLIENT_ISOLATION="false"
+  WIFI_AP_MODE="auto"
 
   local rows
   rows="$(psql_hotspot -At -F $'\t' -c "
@@ -79,6 +80,7 @@ load_runtime_config_from_db() {
       'WIFI_CHANNEL',
       'WIFI_FREQ_BAND',
       'WIFI_CHANNEL_CANDIDATES',
+      'WIFI_AP_MODE',
       'HOTSPOT_GATEWAY',
       'HOTSPOT_CIDR',
       'HOTSPOT_DNS_FALLBACKS',
@@ -96,7 +98,7 @@ load_runtime_config_from_db() {
   while IFS=$'\t' read -r key value; do
     [[ -n "${key}" ]] || continue
     case "${key}" in
-      WIFI_INTERFACE|INTERNET_INTERFACE|WIFI_SSID|WIFI_PASSWORD|WIFI_OPEN|WIFI_COUNTRY|WIFI_CHANNEL|WIFI_FREQ_BAND|WIFI_CHANNEL_CANDIDATES|HOTSPOT_GATEWAY|HOTSPOT_CIDR|HOTSPOT_DNS_FALLBACKS|BINDNET_UPLINK_INTERFACE|UPLINK_MONITOR_INTERVAL|CLIENT_ISOLATION)
+      WIFI_INTERFACE|INTERNET_INTERFACE|WIFI_SSID|WIFI_PASSWORD|WIFI_OPEN|WIFI_COUNTRY|WIFI_CHANNEL|WIFI_FREQ_BAND|WIFI_CHANNEL_CANDIDATES|WIFI_AP_MODE|HOTSPOT_GATEWAY|HOTSPOT_CIDR|HOTSPOT_DNS_FALLBACKS|BINDNET_UPLINK_INTERFACE|UPLINK_MONITOR_INTERVAL|CLIENT_ISOLATION)
         printf -v "${key}" '%s' "${value}"
         export "${key}"
         ;;
@@ -334,6 +336,7 @@ WIFI_FREQ_BAND="${WIFI_FREQ_BAND:-auto}"
 source "$(dirname "$0")/history.sh"
 source "$(dirname "$0")/channel.sh"
 source "$(dirname "$0")/sta_link.sh"
+source "$(dirname "$0")/radio_caps.sh"
 source "$(dirname "$0")/interfaces.sh"
 source "$(dirname "$0")/uplink.sh"
 source "$(dirname "$0")/uplink_monitor.sh"
@@ -420,6 +423,11 @@ export DHCP_SEARCH_DOMAINS DHCP_DOMAIN DHCP_DNS_SERVERS
 # quando a fonte muda.
 resolve_internet_interface
 warn_if_concurrent_ap_sta_risky
+# Vale pra qualquer cenario com estacao preservada (inclusive Ethernet
+# para Wi-Fi), nao so Wi-Fi para Wi-Fi - por isso fora do
+# warn_if_concurrent_ap_sta_risky acima, que so age quando as duas
+# interfaces sao a mesma.
+warn_ap_sta_channel_lock
 
 # try_create_ap tenta subir o hotspot num canal/banda especificos.
 # Devolve 0 em sucesso (create_ap encerrado com exit code 0 - parada
@@ -428,12 +436,31 @@ warn_if_concurrent_ap_sta_risky
 # configurar uma interface virtual), ou 1 para qualquer outra falha
 # (ex.: "adapter can not transmit" nesse canal especifico).
 CREATE_AP_LOG="/tmp/bindnet-hotspot-create_ap.log"
-DNSMASQ_DHCP_LOG="/tmp/bindnet-dnsmasq-dhcp.log"
+# DNSMASQ_DHCP_LOG mora em /var/log e NAO em /tmp de proposito. O
+# kernel do host tem "fs.protected_regular" ligado (=2 no Ubuntu atual),
+# que recusa com EACCES abrir com O_CREAT um arquivo dentro de um
+# diretorio sticky e world-writable (/tmp, modo 1777, dono root) quando
+# o arquivo pertence a OUTRO usuario e quem abre nao e o dono dele.
+#
+# E exatamente o que acontecia aqui: o dnsmasq abre este log como root
+# e em seguida faz fchown para o proprio usuario "dnsmasq". Resultado -
+# a PRIMEIRA execucao funciona (arquivo ainda root, dono igual ao do
+# diretorio) e toda execucao seguinte morre com
+# "dnsmasq: cannot open log /tmp/... : Permission denied" antes de
+# servir DHCP, derrubando o create_ap inteiro. Confirmado ao vivo
+# reproduzindo os dois casos lado a lado no container: caminho antigo
+# falha, caminho novo sobe.
+#
+# /var/log e root:root 0755, sem sticky bit - a protecao simplesmente
+# nao se aplica. O caminho e fixo (nao o CONFDIR aleatorio do
+# create_ap) porque o worker le este arquivo por "docker exec" para
+# montar o fingerprint DHCP - ver dnsmasqDHCPLog em
+# services/worker/controller/internal/hotspot/fingerprint.go, que TEM
+# que apontar para o mesmo lugar.
+DNSMASQ_DHCP_LOG="/var/log/bindnet-dnsmasq-dhcp.log"
 
 prepare_dnsmasq_dhcp_log() {
-  # dnsmasq pode abrir o log depois de baixar privilegios. Se uma
-  # execucao anterior deixou o arquivo root:root/0644 em /tmp, ele falha
-  # com "Permission denied" antes mesmo de servir DHCP.
+  mkdir -p "$(dirname "${DNSMASQ_DHCP_LOG}")"
   rm -f "${DNSMASQ_DHCP_LOG}" || true
   touch "${DNSMASQ_DHCP_LOG}"
   chmod 0666 "${DNSMASQ_DHCP_LOG}"
@@ -516,8 +543,29 @@ try_create_ap() {
       log "ERRO: ${WIFI_INTERFACE} e INTERNET_INTERFACE sao a mesma placa (Wi-Fi para Wi-Fi), mas ela nao esta associada como cliente Wi-Fi agora - subir em --no-virt deixaria o hotspot 'rodando' sem internet nenhuma pra compartilhar. Aguardando a placa reconectar como cliente antes de tentar de novo."
       return 1
     fi
-    virtual_interface_args=(--no-virt)
-    log "${WIFI_INTERFACE} sem associacao Wi-Fi cliente; usando a interface fisica diretamente em modo AP (--no-virt)."
+    # WIFI_AP_MODE=virtual sobe o AP numa ap0 mesmo SEM associacao a
+    # preservar. O ganho nao e preservar conexao nenhuma (nao ha): e que
+    # a placa fisica continua em modo "managed" e gerenciada pelo
+    # NetworkManager, entao ela segue visivel no menu de rede do sistema
+    # e da pra conectar a maquina a uma rede Wi-Fi DEPOIS, com o hotspot
+    # ja no ar. Em --no-virt a placa inteira vira AP e simplesmente some
+    # do sistema ate o hotspot parar.
+    #
+    # Isso so passou a ser viavel com o patch de patch-create-ap.sh: o
+    # motivo historico de preferir --no-virt com a placa ociosa era o
+    # create_ap morrer com "RTNETLINK ... Resource busy" ao trocar a MAC
+    # da ap0 recem-criada (ver RULE.md). Com a troca movida para depois
+    # do "ip link set down", esse impedimento deixou de existir.
+    #
+    # Continua valendo o limite fisico de "#channels <= 1"
+    # (warn_ap_sta_channel_lock em radio_caps.sh): a rede Wi-Fi a que a
+    # maquina se conectar depois tem que estar no mesmo canal do AP.
+    if [[ "${WIFI_AP_MODE:-auto}" == "virtual" ]]; then
+      log "${WIFI_INTERFACE} sem associacao Wi-Fi cliente, mas WIFI_AP_MODE=virtual: subindo o AP numa interface virtual mesmo assim, para a placa fisica continuar gerenciada pelo NetworkManager e disponivel para conectar a uma rede Wi-Fi depois."
+    else
+      virtual_interface_args=(--no-virt)
+      log "${WIFI_INTERFACE} sem associacao Wi-Fi cliente; usando a interface fisica diretamente em modo AP (--no-virt). Para manter a placa disponivel no sistema, mude WIFI_AP_MODE para 'virtual' no painel."
+    fi
   fi
 
   local band_display="${band}GHz"
@@ -707,6 +755,17 @@ cleanup() {
   # watchdog.sh) ficaria orfa segurando a interface fisica mesmo depois
   # do cleanup reportar concluido.
   force_stop_create_ap "${WIFI_INTERFACE}" "${CREATE_AP_PID}"
+  # Devolve a placa fisica ao modo managed. O create_ap NAO restaura o
+  # tipo da interface ao sair de um --no-virt, e deixa-la em "type AP"
+  # tem duas consequencias graves na proxima subida: o modo virtual
+  # falha para sempre com "Resource busy" (a placa so aceita uma
+  # interface AP, e a fisica ja conta como uma) e sta_link_probe nunca
+  # mais enxerga associacao nenhuma, porque exige "type managed". Ver
+  # restore_physical_interface_type, que continua existindo como cura
+  # para o estado deixado por um container morto por SIGKILL - este
+  # ponto aqui e a prevencao, e e o que devolve a placa ao menu de rede
+  # do sistema junto com o wifi-manage do backend.
+  restore_physical_interface_type
   cleanup_bindnet_uplink
 }
 trap cleanup EXIT
@@ -744,7 +803,39 @@ remove_stale_virtual_interfaces() {
     iw dev "${iface}" del >/dev/null 2>&1 || true
   done
 }
+
+# restore_physical_interface_type e o irmao de
+# remove_stale_virtual_interfaces acima, pela MESMA razao e para a
+# mesma armadilha - so que na interface FISICA em vez das apN.
+#
+# Depois de uma execucao em --no-virt (ou de um container morto por
+# SIGKILL antes do cleanup), WIFI_INTERFACE fica presa em "type AP".
+# A combinacao suportada por esta placa permite UMA unica interface AP
+# ("#{ AP, P2P-client, P2P-GO } <= 1" em "iw phy info"), entao pedir a
+# ap0 virtual - que tambem e AP - passa a pedir DUAS: o firmware recusa
+# com "RTNETLINK answers: Resource busy" e o modo virtual falha PARA
+# SEMPRE, em toda tentativa, porque nada devolvia a placa ao modo
+# managed. Confirmado ao vivo nesta maquina (iwlwifi/AX211).
+#
+# Pior: sta_link_probe (sta_link.sh) exige "type managed" para
+# reconhecer uma associacao. Com a placa presa em AP ela NUNCA parece
+# associada, entao o hotspot conclui "sem associacao Wi-Fi cliente"
+# mesmo com o usuario conectado a uma rede - um unico estado preso
+# quebrava os dois caminhos ao mesmo tempo.
+#
+# Rodar isto tambem antes de um --no-virt e inofensivo: o create_ap
+# coloca a placa em modo AP por conta propria logo em seguida, e sair
+# de um estado sujo e sempre a base correta.
+restore_physical_interface_type() {
+  iw dev "${WIFI_INTERFACE}" info 2>/dev/null | grep -q 'type AP' || return 0
+  log "AVISO: ${WIFI_INTERFACE} ficou em 'type AP' de uma execucao anterior; devolvendo ao modo managed antes de tentar de novo (a placa aceita uma unica interface AP por vez)."
+  ip link set down dev "${WIFI_INTERFACE}" >/dev/null 2>&1 || true
+  iw dev "${WIFI_INTERFACE}" set type managed >/dev/null 2>&1 || true
+  ip link set up dev "${WIFI_INTERFACE}" >/dev/null 2>&1 || true
+}
+
 remove_stale_virtual_interfaces
+restore_physical_interface_type
 
 setup_bindnet_virtual_uplink
 start_uplink_monitor
@@ -770,6 +861,12 @@ attempt_hotspot_cycle() {
   # fonte antiga (ex.: esperando uma associacao STA que nao e mais o
   # uplink).
   refresh_internet_strategy_from_db
+  # Tambem por tentativa, nao so na subida do script: um create_ap que
+  # falhou no meio pode deixar a placa em "type AP", e a partir dai
+  # TODAS as tentativas seguintes desta mesma execucao herdariam o
+  # estado sujo (ver o comentario da funcao). Idempotente e sem custo
+  # quando a placa ja esta managed.
+  restore_physical_interface_type
 
   if [[ -n "${LAST_GOOD_BAND}" && -n "${LAST_GOOD_CHANNEL}" ]]; then
     log "Tentando primeiro o canal ${LAST_GOOD_CHANNEL} (${LAST_GOOD_BAND}GHz), que funcionou da ultima vez nesta execucao."
