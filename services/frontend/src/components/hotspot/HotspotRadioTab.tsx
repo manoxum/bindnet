@@ -1,16 +1,19 @@
-import type { UseFormRegister } from "react-hook-form";
+import type { UseFormRegister, UseFormSetValue, UseFormWatch } from "react-hook-form";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SelectNative } from "@/components/ui/select-native";
 import { TabsContent } from "@/components/ui/tabs";
 import type { ConfigForm } from "@/components/hotspot/hotspot-schema";
 import { WIFI_COUNTRIES } from "@/components/hotspot/wifi-countries";
+import { HotspotAnchorField } from "@/components/hotspot/HotspotAnchorField";
 
 interface HotspotRadioTabProps {
   register: UseFormRegister<ConfigForm>;
+  setValue: UseFormSetValue<ConfigForm>;
+  watch: UseFormWatch<ConfigForm>;
 }
 
-export function HotspotRadioTab({ register }: HotspotRadioTabProps) {
+export function HotspotRadioTab({ register, setValue, watch }: HotspotRadioTabProps) {
   return (
     <TabsContent value="radio" className="mt-0">
       <fieldset className="space-y-4">
@@ -41,6 +44,9 @@ export function HotspotRadioTab({ register }: HotspotRadioTabProps) {
           <div className="space-y-2 sm:col-span-3">
             <Label htmlFor="WIFI_CHANNEL_CANDIDATES">Canais candidatos</Label>
             <Input id="WIFI_CHANNEL_CANDIDATES" placeholder="1,6,11" {...register("WIFI_CHANNEL_CANDIDATES")} />
+          </div>
+          <div className="sm:col-span-3">
+            <HotspotAnchorField register={register} setValue={setValue} watch={watch} />
           </div>
         </div>
       </fieldset>

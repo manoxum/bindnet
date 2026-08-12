@@ -28,7 +28,7 @@ func RegisterHotspotLifecycleRoutes(mux *http.ServeMux, worker *workerapi.Client
 	mux.HandleFunc("POST /api/hotspot/apply", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := detachedHotspotContext()
 		defer cancel()
-		if err := applyHotspotRuntimeConfig(ctx, db, worker.Slow()); err != nil {
+		if err := applyHotspotRuntimeConfig(ctx, db, worker.Slow(), StartReasonManual); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
@@ -67,7 +67,7 @@ func RegisterHotspotLifecycleRoutes(mux *http.ServeMux, worker *workerapi.Client
 			http.Error(w, "falha ao gravar a intencao de ligar o hotspot: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := startHotspotRuntimeConfig(ctx, db, worker.Slow()); err != nil {
+		if err := startHotspotRuntimeConfig(ctx, db, worker.Slow(), StartReasonManual); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}

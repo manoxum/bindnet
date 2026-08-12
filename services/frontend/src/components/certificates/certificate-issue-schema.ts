@@ -2,6 +2,12 @@ import { z } from "zod";
 import type { CertificateValidityUnit, IssueCertificateRequest } from "@/components/certificates/certificate-types";
 
 export const certificateIssueFormSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Informe o nome do certificado")
+    .max(100, "Use no máximo 100 caracteres")
+    .refine((value) => !/[\\/"\u0000-\u001f\u007f]/.test(value), "Não use barras, aspas ou caracteres de controle"),
   domains: z.string().trim().min(1, "Informe ao menos um domínio ou IP"),
   validityQuantity: z
     .string()
@@ -13,6 +19,7 @@ export const certificateIssueFormSchema = z.object({
 export type CertificateIssueFormValues = z.infer<typeof certificateIssueFormSchema>;
 
 export const emptyCertificateIssueForm: CertificateIssueFormValues = {
+  name: "",
   domains: "",
   validityQuantity: "2",
   validityUnit: "years" as CertificateValidityUnit,
@@ -36,6 +43,7 @@ function parseDomainsInput(value: string): string[] {
 
 export function formValuesToIssueCertificateRequest(values: CertificateIssueFormValues): IssueCertificateRequest {
   return {
+    name: values.name.trim(),
     domains: parseDomainsInput(values.domains),
     validityQuantity: Number(values.validityQuantity),
     validityUnit: values.validityUnit,

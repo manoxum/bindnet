@@ -3,7 +3,7 @@ include:
 
 services:
   migration:
-    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-migration-${STAGE:-main}-${VERSION:-latest}
+    image: ${DOCKERHUB:-zootakuxy}/private:bindnet-migration-${STAGE:-main}-${VERSION:-latest}
     restart: "no"
     environment:
       TZ: ${TZ:-Africa/Sao_Tome}
@@ -15,7 +15,7 @@ services:
       - proxy
 
   dns-provider:
-    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-dns-provider-${STAGE:-main}-${VERSION:-latest}
+    image: ${DOCKERHUB:-zootakuxy}/private:bindnet-dns-provider-${STAGE:-main}-${VERSION:-latest}
     restart: unless-stopped
     network_mode: host
     env_file:
@@ -40,7 +40,7 @@ services:
         condition: service_completed_successfully
 
   hotspot:
-    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-hotspot-${STAGE:-main}-${VERSION:-latest}
+    image: ${DOCKERHUB:-zootakuxy}/private:bindnet-hotspot-${STAGE:-main}-${VERSION:-latest}
     restart: unless-stopped
     privileged: true
     network_mode: host
@@ -66,7 +66,7 @@ services:
         condition: service_completed_successfully
 
   worker:
-    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-worker-${STAGE:-main}-${VERSION:-latest}
+    image: ${DOCKERHUB:-zootakuxy}/private:bindnet-worker-${STAGE:-main}-${VERSION:-latest}
     restart: unless-stopped
     privileged: true
     network_mode: host
@@ -91,7 +91,7 @@ services:
       - ./:/workspace
 
   backend:
-    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-backend-${STAGE:-main}-${VERSION:-latest}
+    image: ${DOCKERHUB:-zootakuxy}/private:bindnet-backend-${STAGE:-main}-${VERSION:-latest}
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Africa/Sao_Tome}
@@ -144,7 +144,7 @@ services:
       - proxy
 
   frontend:
-    image: ${DOCKERHUB:-brainsoftstp}/private:bindnet-frontend-${STAGE:-main}-${VERSION:-latest}
+    image: ${DOCKERHUB:-zootakuxy}/private:bindnet-frontend-${STAGE:-main}-${VERSION:-latest}
     restart: unless-stopped
     # network_mode: host (em vez de publicar a porta na rede "proxy") -
     # necessario para que o nginx enxergue o IP real do dispositivo

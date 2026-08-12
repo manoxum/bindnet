@@ -68,7 +68,14 @@ func EnsureHotspotContainer() error {
 // ExecHotspotEntrypoint entra na mesma fila de EnsureHotspotContainer:
 // um "stop" chegando no meio de uma recriacao (ou vice-versa) e a mesma
 // corrida, so que com o container trocando de baixo do exec.
-func ExecHotspotEntrypoint(action string) ([]byte, error) {
+//
+// env recebe pares "NOME=valor" repassados ao processo via "docker exec
+// -e". Usado hoje so por HOTSPOT_START_REASON, que o entrypoint precisa
+// pra decidir se pode desbloquear o radio via rfkill (ver
+// ensure_wifi_radio_unblocked em services/worker/hotspot/regulatory.sh)
+// - e informacao do CHAMADOR, nao configuracao do hotspot, entao nao
+// cabe na tabela hotspot_config que o container le sozinho.
+func ExecHotspotEntrypoint(action string, env ...string) ([]byte, error) {
 	lifecycleMutex.Lock()
 	defer lifecycleMutex.Unlock()
 
@@ -82,7 +89,12 @@ func ExecHotspotEntrypoint(action string) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("container hotspot nao esta em execucao")
 	}
-	return exec.Command("docker", "exec", containerID, "/usr/local/bin/hotspot-entrypoint.sh", action).CombinedOutput()
+	args := []string{"exec"}
+	for _, pair := range env {
+		args = append(args, "-e", pair)
+	}
+	args = append(args, containerID, "/usr/local/bin/hotspot-entrypoint.sh", action)
+	return exec.Command("docker", args...).CombinedOutput()
 }
 
 func ServiceContainerRunning(service string) (string, bool, error) {

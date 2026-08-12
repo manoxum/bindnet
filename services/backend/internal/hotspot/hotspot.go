@@ -38,6 +38,20 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
+	// Redes Wi-Fi visiveis, para o seletor da "rede ancora" (ver
+	// WIFI_ANCHOR_SSID em store/hotspot_config_store.go). O worker le o
+	// cache do NetworkManager e nunca forca varredura - um scan ativo
+	// com o AP no ar interrompe o beacon e chega a derrubar clientes.
+	mux.HandleFunc("GET /api/hotspot/wifi-scan", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		var networks json.RawMessage
+		if err := worker.Call(r.Context(), http.MethodGet, "/network/wifi-scan", nil, &networks); err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(networks)
+	}))
+
 	mux.HandleFunc("GET /api/hotspot/interfaces", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		var interfaces json.RawMessage
 		if err := worker.Call(r.Context(), http.MethodGet, "/network/interfaces", nil, &interfaces); err != nil {
@@ -99,18 +113,45 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 	RegisterHotspotAutostartRoutes(mux, admin, audit, db)
 }
 
-func applyHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerapi.Client) error {
-	config, err := store.HotspotRuntimeConfig(ctx, db)
+// StartReasonManual/StartReasonAuto viajam junto com a configuracao no
+// corpo de /hotspot/start e /hotspot/apply (chave interna
+// _START_REASON, nunca gravada no banco) so pra o entrypoint do hotspot
+// saber se pode desbloquear o radio via rfkill: religar um radio que o
+// usuario acabou de desligar no sistema faria o interruptor de Wi-Fi
+// dele parar de funcionar enquanto o hotspot estivesse ligado. Ver
+// ensure_wifi_radio_unblocked em
+// services/worker/hotspot/regulatory.sh.
+const (
+	StartReasonManual = "manual"
+	StartReasonAuto   = "auto"
+)
+
+func applyHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerapi.Client, reason string) error {
+	config, err := hotspotConfigWithStartReason(ctx, db, worker, reason)
 	if err != nil {
 		return err
 	}
 	return worker.Call(ctx, http.MethodPost, "/hotspot/apply", config, nil)
 }
 
-func startHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerapi.Client) error {
-	config, err := store.HotspotRuntimeConfig(ctx, db)
+func startHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerapi.Client, reason string) error {
+	config, err := hotspotConfigWithStartReason(ctx, db, worker, reason)
 	if err != nil {
 		return err
 	}
 	return worker.Call(ctx, http.MethodPost, "/hotspot/start", config, nil)
+}
+
+func hotspotConfigWithStartReason(ctx context.Context, db *sql.DB, worker *workerapi.Client, reason string) (map[string]string, error) {
+	// Antes de ler a configuracao: e na subida que o canal da rede
+	// ancora importa, e e o unico momento em que da pra corrigi-lo sem
+	// derrubar clientes (ver refreshAnchorChannel em hotspot_anchor.go).
+	refreshAnchorChannel(ctx, db, worker)
+
+	config, err := store.HotspotRuntimeConfig(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	config["_START_REASON"] = reason
+	return config, nil
 }

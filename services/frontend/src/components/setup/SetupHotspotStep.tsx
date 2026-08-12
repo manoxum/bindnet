@@ -55,6 +55,8 @@ export function SetupHotspotStep({ initialData, onNext, onSkip }: SetupHotspotSt
       <CardContent>
         <HotspotConfigForm
           register={register}
+          setValue={setValue}
+          watch={watch}
           errors={errors}
           handleSubmit={handleSubmit}
           onSave={() => {}}

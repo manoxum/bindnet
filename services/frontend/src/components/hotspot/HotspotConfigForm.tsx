@@ -1,4 +1,4 @@
-import type { FieldErrors, UseFormHandleSubmit, UseFormRegister } from "react-hook-form";
+import type { FieldErrors, UseFormHandleSubmit, UseFormRegister, UseFormSetValue, UseFormWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ConfigForm } from "@/components/hotspot/hotspot-schema";
@@ -18,6 +18,8 @@ interface NetworkInterface {
 
 interface HotspotConfigFormProps {
   register: UseFormRegister<ConfigForm>;
+  setValue: UseFormSetValue<ConfigForm>;
+  watch: UseFormWatch<ConfigForm>;
   errors: FieldErrors<ConfigForm>;
   handleSubmit: UseFormHandleSubmit<ConfigForm>;
   onSave: (data: ConfigForm) => void;
@@ -45,6 +47,8 @@ interface HotspotConfigFormProps {
 // compacto.
 export function HotspotConfigForm({
   register,
+  setValue,
+  watch,
   errors,
   handleSubmit,
   onSave,
@@ -84,7 +88,7 @@ export function HotspotConfigForm({
           wifiInterfaces={wifiInterfaces}
           networkInterfaces={networkInterfaces}
         />
-        <HotspotRadioTab register={register} />
+        <HotspotRadioTab register={register} setValue={setValue} watch={watch} />
         <HotspotNetworkTab register={register} errors={errors} />
         <HotspotUplinkTab register={register} errors={errors} />
         {showServiceTab && <HotspotServiceTab />}

@@ -87,11 +87,18 @@ export function HotspotPage() {
   const blockedCount = blocklist.data?.length ?? 0;
   const blockedMacs = new Set(blocklist.data?.map((device) => device.macAddress) ?? []);
 
+  // "starting": serviço vivo mas AP ainda não no ar (ou caído e a ser
+  // retentado). Distinto de ligado — ver status_service em
+  // services/worker/hotspot/entrypoint.sh.
+  const starting = status.data?.status === "starting";
+
   usePageHeader({
     title: "Hotspot Wi-Fi",
-    description: status.data?.running
-      ? `Rodando · canal ${status.data.channel ?? "?"} · banda ${status.data.band ?? "?"}GHz`
-      : "Parado",
+    description: starting
+      ? "A iniciar…"
+      : status.data?.running
+        ? `Rodando · canal ${status.data.channel ?? "?"} · banda ${status.data.band ?? "?"}GHz`
+        : "Parado",
   });
 
   return (
@@ -99,6 +106,7 @@ export function HotspotPage() {
       <HotspotSummaryCard
         config={config.data ?? {}}
         running={!!status.data?.running}
+        starting={starting}
         currentBand={status.data?.band}
         currentChannel={status.data?.channel}
         currentInternetInterface={status.data?.internetInterface}
@@ -130,6 +138,8 @@ export function HotspotPage() {
         configOpen={configOpen}
         onConfigOpenChange={setConfigOpen}
         register={register}
+        setValue={setValue}
+        watch={watch}
         errors={errors}
         handleSubmit={handleSubmit}
         onSave={(data) => saveAndApply.mutate(data)}

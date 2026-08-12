@@ -18,8 +18,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func syncCertificateToNginxUILocal(domain string, sanDomains []string, certificatePEM, privateKeyPEM string) error {
-	certPath, keyPath := nginxUICertificatePaths(domain)
+func syncCertificateToNginxUILocal(name string, sanDomains []string, certificatePEM, privateKeyPEM string) error {
+	certPath, keyPath := nginxUICertificatePaths(name)
 	hostCertPath := nginxUIContainerPathToBackendPath(certPath)
 	hostKeyPath := nginxUIContainerPathToBackendPath(keyPath)
 
@@ -40,7 +40,7 @@ func syncCertificateToNginxUILocal(domain string, sanDomains []string, certifica
 	defer db.Close()
 
 	if len(sanDomains) == 0 {
-		sanDomains = []string{domain}
+		sanDomains = []string{defaultDomain}
 	}
 	domainsJSON, err := json.Marshal(sanDomains)
 	if err != nil {
@@ -55,7 +55,7 @@ func syncCertificateToNginxUILocal(domain string, sanDomains []string, certifica
 		   AND (name = ? OR (ssl_certificate_path = ? AND ssl_certificate_key_path = ?))
 		 ORDER BY id DESC
 		 LIMIT 1`,
-		domain, certPath, keyPath,
+		name, certPath, keyPath,
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		_, err = db.Exec(
@@ -65,12 +65,12 @@ func syncCertificateToNginxUILocal(domain string, sanDomains []string, certifica
 				auto_cert, challenge_method, key_type, log, sync_node_ids,
 				must_staple, lego_disable_cname_support, revoke_old
 			) VALUES (?, ?, ?, ?, ?, ?, ?, -1, '', 'RSA2048', '', '[]', 0, 0, 0)`,
-			now, now, domain, string(domainsJSON), domain, certPath, keyPath,
+			now, now, name, string(domainsJSON), name, certPath, keyPath,
 		)
 		if err != nil {
 			return err
 		}
-		log.Printf("[backend] certificado de %s importado no nginx-ui via database local", domain)
+		log.Printf("[backend] certificado %s importado no nginx-ui via database local", name)
 		return nil
 	}
 	if err != nil {
@@ -83,17 +83,17 @@ func syncCertificateToNginxUILocal(domain string, sanDomains []string, certifica
 		     ssl_certificate_path = ?, ssl_certificate_key_path = ?,
 		     auto_cert = -1, key_type = 'RSA2048'
 		 WHERE id = ?`,
-		now, string(domainsJSON), domain, certPath, keyPath, id,
+		now, string(domainsJSON), name, certPath, keyPath, id,
 	)
 	if err != nil {
 		return err
 	}
-	log.Printf("[backend] certificado de %s atualizado no nginx-ui via database local", domain)
+	log.Printf("[backend] certificado %s atualizado no nginx-ui via database local", name)
 	return nil
 }
 
-func removeCertificateFromNginxUI(domain string) error {
-	certPath, keyPath := nginxUICertificatePaths(domain)
+func removeCertificateFromNginxUI(name string) error {
+	certPath, keyPath := nginxUICertificatePaths(name)
 	db, err := openNginxUIDatabase()
 	if err != nil {
 		return err
@@ -106,7 +106,7 @@ func removeCertificateFromNginxUI(domain string) error {
 		 SET updated_at = ?, deleted_at = ?
 		 WHERE deleted_at IS NULL
 		   AND (name = ? OR (ssl_certificate_path = ? AND ssl_certificate_key_path = ?))`,
-		now, now, domain, certPath, keyPath,
+		now, now, name, certPath, keyPath,
 	)
 	if err != nil {
 		return err
@@ -121,10 +121,10 @@ func removeCertificateFromNginxUI(domain string) error {
 	}
 
 	if rowsAffected == 0 {
-		log.Printf("[backend] certificado de %s nao existia na lista do nginx-ui; arquivos locais limpos se existiam", domain)
+		log.Printf("[backend] certificado %s nao existia na lista do nginx-ui; arquivos locais limpos se existiam", name)
 		return nil
 	}
-	log.Printf("[backend] certificado de %s removido do nginx-ui", domain)
+	log.Printf("[backend] certificado %s removido do nginx-ui", name)
 	return nil
 }
 
@@ -133,7 +133,7 @@ func removeCertificateFromNginxUI(domain string) error {
 // database.db do nginx-ui ter sido recriado sem eles.
 func SyncIssuedCertificatesToNginxUI(db *sql.DB) error {
 	rows, err := db.Query(
-		`SELECT domain, COALESCE(array_to_string(dns_names, ','), ''), COALESCE(array_to_string(ip_addresses, ','), ''), certificate_pem, private_key_pem
+		`SELECT name, COALESCE(array_to_string(dns_names, ','), ''), COALESCE(array_to_string(ip_addresses, ','), ''), certificate_pem, private_key_pem
 		 FROM certificates
 		 WHERE revoked_at IS NULL
 		 ORDER BY created_at ASC`,
@@ -146,15 +146,15 @@ func SyncIssuedCertificatesToNginxUI(db *sql.DB) error {
 	count := 0
 	failures := 0
 	for rows.Next() {
-		var domain, dnsNames, ipAddresses, certificatePEM, privateKeyPEM string
-		if err := rows.Scan(&domain, &dnsNames, &ipAddresses, &certificatePEM, &privateKeyPEM); err != nil {
+		var name, dnsNames, ipAddresses, certificatePEM, privateKeyPEM string
+		if err := rows.Scan(&name, &dnsNames, &ipAddresses, &certificatePEM, &privateKeyPEM); err != nil {
 			return err
 		}
 		sanDomains := append(splitNonEmpty(dnsNames), splitNonEmpty(ipAddresses)...)
 		count++
-		if err := syncCertificateToNginxUI(db, domain, sanDomains, certificatePEM, privateKeyPEM); err != nil {
+		if err := syncCertificateToNginxUI(db, name, sanDomains, certificatePEM, privateKeyPEM); err != nil {
 			failures++
-			log.Printf("[backend] falha ao importar certificado existente de %s no nginx-ui: %v", domain, err)
+			log.Printf("[backend] falha ao importar certificado existente %s no nginx-ui: %v", name, err)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -183,8 +183,8 @@ func openNginxUIDatabase() (*sql.DB, error) {
 	return db, nil
 }
 
-func nginxUICertificatePaths(domain string) (certPath, keyPath string) {
-	dir := filepath.ToSlash(filepath.Join(nginxUIContainerNginxConfPath, "ssl", nginxUICertificateDirName(domain)))
+func nginxUICertificatePaths(name string) (certPath, keyPath string) {
+	dir := filepath.ToSlash(filepath.Join(nginxUIContainerNginxConfPath, "ssl", nginxUICertificateDirName(name)))
 	return dir + "/server.crt", dir + "/server.key"
 }
 
@@ -194,6 +194,6 @@ func nginxUIContainerPathToBackendPath(path string) string {
 
 // nginxUICertificateDirName sanitiza ":" (porta) e "*" (dominio
 // curinga, ex.: "*.mydomain") para uso como nome de diretorio.
-func nginxUICertificateDirName(domain string) string {
-	return strings.NewReplacer(":", "_", "*", "_").Replace(domain)
+func nginxUICertificateDirName(name string) string {
+	return strings.NewReplacer(":", "_", "*", "_").Replace(name)
 }

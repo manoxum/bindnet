@@ -21,26 +21,18 @@ func StartHotspotReconciliationLoop(db *sql.DB, worker *workerapi.Client, audit 
 	ctx := context.Background()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	// Zero = nao esta em "starting" agora. Estado local do laco, nao do
+	// pacote: so este laco observa a transicao.
+	var startingSince time.Time
 	for range ticker.C {
-		reconcileHotspotOnce(ctx, db, worker, audit)
+		reconcileHotspotOnce(ctx, db, worker, audit, &startingSince)
 	}
 }
 
-func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerapi.Client, audit *audit.Client) {
-	var status struct {
-		Running bool `json:"running"`
-	}
-	if err := worker.Call(ctx, http.MethodGet, "/hotspot/status", nil, &status); err != nil {
-		return
-	}
-	if !status.Running {
-		// Hotspot parado: ninguem pode estar conectado, fecha toda
-		// sessao em aberto (ver closeStaleSessions em
-		// hotspot_sessions.go).
-		if err := closeStaleSessions(db, nil); err != nil {
-			log.Printf("[backend] reconciliacao: falha ao fechar sessoes com hotspot parado: %v", err)
-		}
-		recoverHotspotIfDesired(ctx, db, worker, audit)
+func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerapi.Client, audit *audit.Client, startingSince *time.Time) {
+	// Estado do servico primeiro: nao ha o que reconciliar por dispositivo
+	// enquanto o AP nao estiver realmente no ar.
+	if !reconcileHotspotService(ctx, db, worker, audit, startingSince) {
 		return
 	}
 
@@ -92,35 +84,6 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 	if err := applyAutomaticTimeRecharges(db); err != nil {
 		log.Printf("[backend] recarga automatica de tempo falhou: %v", err)
 	}
-}
-
-// recoverHotspotIfDesired religa o hotspot sozinho quando ele cai sem
-// que o admin tenha pedido (ex.: watchdog de falha de beacon em
-// services/worker/hotspot/watchdog.sh derrubando o create_ap travado)
-// - so age se a ultima intencao registrada foi ligar
-// (store.HotspotDesiredStateRunning, a mesma usada por
-// AutoStartHotspotOnBoot), senao um "parar" deliberado pelo painel
-// seria desfeito no proximo ciclo deste loop.
-func recoverHotspotIfDesired(ctx context.Context, db *sql.DB, worker *workerapi.Client, audit *audit.Client) {
-	desired, err := store.HotspotDesiredStateRunning(ctx, db)
-	if err != nil {
-		log.Printf("[backend] reconciliacao: falha ao ler estado desejado do hotspot: %v", err)
-		return
-	}
-	if !desired {
-		return
-	}
-
-	iface, err := currentHotspotInterface(ctx, db)
-	if err != nil {
-		log.Printf("[backend] reconciliacao: falha ao ler WIFI_INTERFACE para religar o hotspot: %v", err)
-		return
-	}
-	if err := startHotspotAndReapply(ctx, db, worker, audit, iface, "sistema (auto-recuperacao)"); err != nil {
-		log.Printf("[backend] reconciliacao: falha ao religar hotspot automaticamente: %v", err)
-		return
-	}
-	log.Println("[backend] hotspot religado automaticamente apos queda detectada pela reconciliacao")
 }
 
 // reconcileDeviceShaping reaplica shaping (resolve renovacao de DHCP

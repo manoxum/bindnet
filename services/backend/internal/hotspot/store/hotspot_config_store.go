@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -19,6 +20,8 @@ var hotspotConfigKeys = []string{
 	"WIFI_FREQ_BAND",
 	"WIFI_CHANNEL_CANDIDATES",
 	"WIFI_AP_MODE",
+	"WIFI_ANCHOR_SSID",
+	"WIFI_ANCHOR_CHANNEL",
 	"HOTSPOT_GATEWAY",
 	"HOTSPOT_CIDR",
 	"HOTSPOT_DNS_FALLBACKS",
@@ -30,11 +33,11 @@ var hotspotConfigKeys = []string{
 }
 
 var hotspotConfigDefaults = map[string]string{
-	"INTERNET_INTERFACE":       "auto",
-	"WIFI_OPEN":                "false",
-	"WIFI_COUNTRY":             "ST",
-	"WIFI_CHANNEL":             "auto",
-	"WIFI_FREQ_BAND":           "auto",
+	"INTERNET_INTERFACE": "auto",
+	"WIFI_OPEN":          "false",
+	"WIFI_COUNTRY":       "ST",
+	"WIFI_CHANNEL":       "auto",
+	"WIFI_FREQ_BAND":     "auto",
 	// WIFI_AP_MODE decide se o AP sobe numa interface virtual (ap0) ou
 	// toma a placa fisica inteira (--no-virt). "auto" mantem o
 	// comportamento historico: virtual so quando ja existe uma
@@ -43,6 +46,16 @@ var hotspotConfigDefaults = map[string]string{
 	// visivel no menu de rede do sistema - ver try_create_ap em
 	// services/worker/hotspot/entrypoint.sh e RULE.md.
 	"WIFI_AP_MODE": "auto",
+	// WIFI_ANCHOR_SSID: rede Wi-Fi em cujo canal o AP deve subir. Vazio
+	// (padrao) mantem a escolha por menor interferencia. Num radio unico
+	// o AP e a associacao de estacao dividem a MESMA frequencia
+	// ("#channels <= 1"), entao o canal mais vazio - justamente onde nao
+	// ha rede nenhuma - e o pior possivel para quem quer continuar
+	// conectado a uma rede com o hotspot no ar. WIFI_ANCHOR_CHANNEL
+	// guarda o ultimo canal conhecido dessa rede, para o hotspot subir
+	// certo mesmo quando ela nao esta no ar no momento. Ver RULE.md.
+	"WIFI_ANCHOR_SSID":         "",
+	"WIFI_ANCHOR_CHANNEL":      "",
 	"HOTSPOT_GATEWAY":          "192.168.12.1",
 	"HOTSPOT_CIDR":             "192.168.12.0/24",
 	"HOTSPOT_DNS_FALLBACKS":    "1.1.1.1,8.8.8.8",
@@ -140,6 +153,14 @@ func SaveHotspotConfig(ctx context.Context, db *sql.DB, values map[string]string
 	}
 	if mode, ok := clean["WIFI_AP_MODE"]; ok && mode != "auto" && mode != "virtual" {
 		return errors.New("WIFI_AP_MODE deve ser 'auto' ou 'virtual'")
+	}
+	// Vazio e valido (sem ancora); qualquer outra coisa tem que ser um
+	// canal numerico - o entrypoint usa esse valor direto como "-c" do
+	// create_ap quando a rede ancora nao esta visivel.
+	if channel, ok := clean["WIFI_ANCHOR_CHANNEL"]; ok && channel != "" {
+		if number, err := strconv.Atoi(channel); err != nil || number <= 0 {
+			return errors.New("WIFI_ANCHOR_CHANNEL deve ser um numero de canal ou vazio")
+		}
 	}
 	for _, key := range []string{"FW_WAN_POLICY", "FW_LOCAL_POLICY"} {
 		if policy, ok := clean[key]; ok && policy != "allow" && policy != "deny" {

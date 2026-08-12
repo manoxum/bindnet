@@ -91,7 +91,7 @@ func AutoStartHotspotOnBoot(db *sql.DB, worker *workerapi.Client, audit *audit.C
 func startHotspotAndReapply(ctx context.Context, db *sql.DB, worker *workerapi.Client, audit *audit.Client, iface, username string) error {
 	// Cliente lento: subir o AP passa pelo mesmo caminho demorado do
 	// painel (ver slowTimeout em internal/workerapi/client.go).
-	if err := startHotspotRuntimeConfig(ctx, db, worker.Slow()); err != nil {
+	if err := startHotspotRuntimeConfig(ctx, db, worker.Slow(), StartReasonAuto); err != nil {
 		return err
 	}
 	reapplyHotspotRules(ctx, db, worker, iface)

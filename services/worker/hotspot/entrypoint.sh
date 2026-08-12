@@ -65,6 +65,8 @@ load_runtime_config_from_db() {
   UPLINK_MONITOR_INTERVAL="10"
   CLIENT_ISOLATION="false"
   WIFI_AP_MODE="auto"
+  WIFI_ANCHOR_SSID=""
+  WIFI_ANCHOR_CHANNEL=""
 
   local rows
   rows="$(psql_hotspot -At -F $'\t' -c "
@@ -81,6 +83,8 @@ load_runtime_config_from_db() {
       'WIFI_FREQ_BAND',
       'WIFI_CHANNEL_CANDIDATES',
       'WIFI_AP_MODE',
+      'WIFI_ANCHOR_SSID',
+      'WIFI_ANCHOR_CHANNEL',
       'HOTSPOT_GATEWAY',
       'HOTSPOT_CIDR',
       'HOTSPOT_DNS_FALLBACKS',
@@ -98,7 +102,7 @@ load_runtime_config_from_db() {
   while IFS=$'\t' read -r key value; do
     [[ -n "${key}" ]] || continue
     case "${key}" in
-      WIFI_INTERFACE|INTERNET_INTERFACE|WIFI_SSID|WIFI_PASSWORD|WIFI_OPEN|WIFI_COUNTRY|WIFI_CHANNEL|WIFI_FREQ_BAND|WIFI_CHANNEL_CANDIDATES|WIFI_AP_MODE|HOTSPOT_GATEWAY|HOTSPOT_CIDR|HOTSPOT_DNS_FALLBACKS|BINDNET_UPLINK_INTERFACE|UPLINK_MONITOR_INTERVAL|CLIENT_ISOLATION)
+      WIFI_INTERFACE|INTERNET_INTERFACE|WIFI_SSID|WIFI_PASSWORD|WIFI_OPEN|WIFI_COUNTRY|WIFI_CHANNEL|WIFI_FREQ_BAND|WIFI_CHANNEL_CANDIDATES|WIFI_AP_MODE|WIFI_ANCHOR_SSID|WIFI_ANCHOR_CHANNEL|HOTSPOT_GATEWAY|HOTSPOT_CIDR|HOTSPOT_DNS_FALLBACKS|BINDNET_UPLINK_INTERFACE|UPLINK_MONITOR_INTERVAL|CLIENT_ISOLATION)
         printf -v "${key}" '%s' "${value}"
         export "${key}"
         ;;
@@ -337,6 +341,7 @@ source "$(dirname "$0")/history.sh"
 source "$(dirname "$0")/channel.sh"
 source "$(dirname "$0")/sta_link.sh"
 source "$(dirname "$0")/radio_caps.sh"
+source "$(dirname "$0")/anchor.sh"
 source "$(dirname "$0")/interfaces.sh"
 source "$(dirname "$0")/uplink.sh"
 source "$(dirname "$0")/uplink_monitor.sh"
@@ -637,18 +642,24 @@ try_create_ap() {
   CREATE_AP_PID=
 
   # Registra falha no historico persistente (history.sh) se o AP nunca
-  # chegou a subir nesse banda/canal - "AP-ENABLED" ausente do log e o
-  # sinal confiavel de que o adaptador rejeitou mesmo, independente do
-  # "status" (que so reflete o resultado final de "wait", incluindo
-  # quedas por outro motivo bem depois de ter subido). O SUCESSO ja foi
-  # registrado ao vivo por start_beacon_failure_watcher (watchdog.sh)
-  # no instante em que "AP-ENABLED" apareceu - nao registrar de novo
-  # aqui: "wait" so retorna quando o create_ap eventualmente sai
-  # (parada pedida, possivelmente dias depois, ou uma queda por outro
-  # motivo), nunca no momento do sucesso de verdade, entao nunca
-  # sobrescreve/duplica o que ja foi contado.
+  # chegou a subir nesse banda/canal. O SUCESSO ja foi registrado ao
+  # vivo por start_beacon_failure_watcher (watchdog.sh) no instante em
+  # que "AP-ENABLED" apareceu - nao registrar de novo aqui: "wait" so
+  # retorna quando o create_ap eventualmente sai (parada pedida,
+  # possivelmente dias depois, ou uma queda por outro motivo), nunca no
+  # momento do sucesso de verdade, entao nunca sobrescreve/duplica o que
+  # ja foi contado.
+  #
+  # "AP-ENABLED ausente" NAO basta pra culpar o canal: qualquer coisa
+  # que mate o create_ap antes do AP subir produz o mesmo sintoma. Por
+  # isso channel_failure_is_attributable (history.sh) filtra as causas
+  # conhecidamente alheias ao canal antes de contar a falha.
   if ! grep -q 'AP-ENABLED' "${CREATE_AP_LOG}" 2>/dev/null; then
-    record_channel_result "${band}" "${channel}" 0
+    if channel_failure_is_attributable "${CREATE_AP_LOG}"; then
+      record_channel_result "${band}" "${channel}" 0
+    else
+      log "Falha nesta tentativa nao e atribuivel ao canal ${channel} (${band}GHz) - nao contando contra ele no historico."
+    fi
   fi
 
   # LAST_GOOD_BAND/LAST_GOOD_CHANNEL (globais, declaradas mais abaixo)
@@ -861,6 +872,24 @@ attempt_hotspot_cycle() {
   # fonte antiga (ex.: esperando uma associacao STA que nao e mais o
   # uplink).
   refresh_internet_strategy_from_db
+
+  # Radio desligado: desiste NA HORA (status 2 = falha definitiva, sai
+  # sem retentar - ver contrato de try_create_ap). Sem isto, cada ciclo
+  # torrava os 11 canais candidatos das duas bandas contra um radio em
+  # baixo, gastando minutos, enchendo o log e - pior - gravando 11
+  # falsas "rejeicoes do adaptador" no historico de canais por ciclo.
+  #
+  # Sair rapido e o comportamento certo aqui: quem religa e a
+  # reconciliacao do backend (ciclo de 15s), que vai tentar de novo e
+  # ter sucesso no instante em que o Wi-Fi voltar. Nao ha nada que este
+  # processo possa fazer enquanto o radio estiver bloqueado - e
+  # desbloquea-lo por conta propria seria desfazer o "desligar Wi-Fi"
+  # do usuario (ver ensure_wifi_radio_unblocked em regulatory.sh).
+  if wifi_radio_blocked; then
+    log "ERRO: radio Wi-Fi bloqueado (rfkill) - nenhum canal pode funcionar assim. Aguardando o Wi-Fi ser religado; o hotspot sobe sozinho quando isso acontecer."
+    return 2
+  fi
+
   # Tambem por tentativa, nao so na subida do script: um create_ap que
   # falhou no meio pode deixar a placa em "type AP", e a partir dai
   # TODAS as tentativas seguintes desta mesma execucao herdariam o
@@ -929,6 +958,25 @@ attempt_hotspot_cycle() {
     # estacao estabilizar sozinha.
     log "ERRO: nao foi possivel confirmar o canal atual da associacao Wi-Fi cliente de ${WIFI_INTERFACE} mesmo apos aguardar - Wi-Fi para Wi-Fi nao varre canais nessa placa (a varredura ativa so pioraria a instabilidade da propria conexao cliente). Aguardando reconectar antes de tentar de novo."
     return 1
+  fi
+
+  # Rede ancora (anchor.sh): sobe no canal da rede a que o operador quer
+  # continuar conectado, em vez do canal menos interferido. Vem DEPOIS
+  # do bloco da estacao associada acima - se ja existe associacao, o
+  # canal dela nao e preferencia, e fisica: o radio ja esta sintonizado
+  # ali - e ANTES da varredura por interferencia, que e justamente o
+  # criterio que a ancora existe para substituir.
+  local anchor_band_channel_value
+  if anchor_band_channel_value="$(anchor_band_channel)"; then
+    local anchor_band="${anchor_band_channel_value% *}"
+    local anchor_channel="${anchor_band_channel_value#* }"
+    log "Rede ancora '${WIFI_ANCHOR_SSID}' (canal ${anchor_channel}, ${anchor_band}GHz): subindo o AP nesse canal para a maquina poder se associar a ela com o hotspot no ar."
+    status=0
+    try_create_ap "${anchor_band}" "${anchor_channel}" || status=$?
+    if [[ "${status}" -eq 0 || "${status}" -eq 2 ]]; then
+      return "${status}"
+    fi
+    log "AVISO: o canal ${anchor_channel} da rede ancora nao funcionou; caindo na selecao automatica por interferencia."
   fi
 
   local first_band="${LAST_GOOD_BAND:-${WIFI_FREQ_BAND}}"

@@ -22,14 +22,17 @@ import (
 var errCertificateNotRevoked = errors.New("certificado ainda nao foi revogado")
 
 type certificateResponse struct {
-	ID          string   `json:"id"`
-	Domain      string   `json:"domain"`
-	CommonName  string   `json:"commonName"`
-	DNSNames    []string `json:"dnsNames,omitempty"`
-	IPAddresses []string `json:"ipAddresses,omitempty"`
-	IssuedAt    string   `json:"issuedAt"`
-	ExpiresAt   string   `json:"expiresAt"`
-	RevokedAt   *string  `json:"revokedAt,omitempty"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Domain           string   `json:"domain"`
+	CommonName       string   `json:"commonName"`
+	DNSNames         []string `json:"dnsNames,omitempty"`
+	IPAddresses      []string `json:"ipAddresses,omitempty"`
+	IssuedAt         string   `json:"issuedAt"`
+	ExpiresAt        string   `json:"expiresAt"`
+	ValidityQuantity int      `json:"validityQuantity"`
+	ValidityUnit     string   `json:"validityUnit"`
+	RevokedAt        *string  `json:"revokedAt,omitempty"`
 }
 
 // issueCertificate sempre cria uma linha nova (sem cache de arquivo por
@@ -37,12 +40,12 @@ type certificateResponse struct {
 // acao explicita do usuario via UI, nao um lookup implicito por SNI.
 // rawDomains vira um unico certificado com todos os dominios/IPs como
 // SAN (Subject Alternative Name) - a primeira entrada normalizada e o
-// dominio/CN primario (coluna "domain"), usado como nome de referencia
+// dominio/CN primario (coluna "domain"). name e o nome amigavel usado
 // nas listagens e na importacao para o nginx-ui. validityQuantity e
 // validityUnit (days|weeks|months|years) definem NotAfter - invalidas
 // caem para o padrao de 2 anos (ver normalizeValidityPeriod), e o
 // resultado nunca ultrapassa a validade da propria CA.
-func issueCertificate(db *sql.DB, ca *localCA, rawDomains []string, validityQuantity int, validityUnit string) (*certificateResponse, error) {
+func issueCertificate(db *sql.DB, ca *localCA, name string, rawDomains []string, validityQuantity int, validityUnit string) (*certificateResponse, error) {
 	domains := normalizeDomainList(rawDomains)
 	primary := domains[0]
 	quantity, unit := normalizeValidityPeriod(validityQuantity, validityUnit)
@@ -88,25 +91,27 @@ func issueCertificate(db *sql.DB, ca *localCA, rawDomains []string, validityQuan
 
 	var id string
 	err = db.QueryRow(
-		`INSERT INTO certificates (domain, common_name, dns_names, ip_addresses, serial_number, certificate_pem, private_key_pem, issued_at, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-		primary, primary, dnsNames, ipAddresses, serialNumber.String(),
+		`INSERT INTO certificates (name, domain, common_name, dns_names, ip_addresses, serial_number, certificate_pem, private_key_pem, issued_at, expires_at, validity_quantity, validity_unit)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+		name, primary, primary, dnsNames, ipAddresses, serialNumber.String(),
 		string(certPEM), string(keyPEM), tpl.NotBefore, tpl.NotAfter,
+		quantity, unit,
 	).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("[backend] certificado emitido para %s (%d dominio(s)/IP(s))", primary, len(domains))
+	log.Printf("[backend] certificado %s emitido para %s (%d dominio(s)/IP(s))", name, primary, len(domains))
 
-	if err := syncCertificateToNginxUI(db, primary, domains, string(certPEM), string(keyPEM)); err != nil {
-		log.Printf("[backend] falha ao carregar certificado de %s no nginx-ui: %v", primary, err)
+	if err := syncCertificateToNginxUI(db, name, domains, string(certPEM), string(keyPEM)); err != nil {
+		log.Printf("[backend] falha ao carregar certificado %s no nginx-ui: %v", name, err)
 	}
 
 	return &certificateResponse{
-		ID: id, Domain: primary, CommonName: primary,
+		ID: id, Name: name, Domain: primary, CommonName: primary,
 		DNSNames: dnsNames, IPAddresses: ipAddresses,
 		IssuedAt: tpl.NotBefore.Format(time.RFC3339), ExpiresAt: tpl.NotAfter.Format(time.RFC3339),
+		ValidityQuantity: quantity, ValidityUnit: unit,
 	}, nil
 }
 
@@ -116,7 +121,7 @@ func listCertificates(db *sql.DB, revoked bool) ([]certificateResponse, error) {
 		revokedFilter = `revoked_at IS NOT NULL`
 	}
 	rows, err := db.Query(
-		`SELECT id, domain, common_name, COALESCE(array_to_string(dns_names, ','), ''), COALESCE(array_to_string(ip_addresses, ','), ''), issued_at, expires_at, revoked_at
+		`SELECT id, name, domain, common_name, COALESCE(array_to_string(dns_names, ','), ''), COALESCE(array_to_string(ip_addresses, ','), ''), issued_at, expires_at, validity_quantity, validity_unit, revoked_at
 		 FROM certificates
 		 WHERE ` + revokedFilter + `
 		 ORDER BY created_at DESC`,
@@ -132,7 +137,7 @@ func listCertificates(db *sql.DB, revoked bool) ([]certificateResponse, error) {
 		var dnsNames, ipAddresses string
 		var issuedAt, expiresAt time.Time
 		var revokedAt sql.NullTime
-		if err := rows.Scan(&r.ID, &r.Domain, &r.CommonName, &dnsNames, &ipAddresses, &issuedAt, &expiresAt, &revokedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Domain, &r.CommonName, &dnsNames, &ipAddresses, &issuedAt, &expiresAt, &r.ValidityQuantity, &r.ValidityUnit, &revokedAt); err != nil {
 			return nil, err
 		}
 		r.DNSNames = splitNonEmpty(dnsNames)
@@ -153,25 +158,25 @@ func listCertificates(db *sql.DB, revoked bool) ([]certificateResponse, error) {
 // A operacao e idempotente para permitir nova tentativa de limpeza do
 // nginx-ui caso a primeira remocao externa falhe depois da revogacao local.
 func revokeCertificate(db *sql.DB, id string) (string, error) {
-	var domain string
-	if err := db.QueryRow(`SELECT domain FROM certificates WHERE id = $1`, id).Scan(&domain); err != nil {
+	var name string
+	if err := db.QueryRow(`SELECT name FROM certificates WHERE id = $1`, id).Scan(&name); err != nil {
 		return "", err
 	}
 	_, err := db.Exec(`UPDATE certificates SET revoked_at = COALESCE(revoked_at, now()) WHERE id = $1`, id)
-	return domain, err
+	return name, err
 }
 
-func revokedCertificateDomainByID(db *sql.DB, id string) (string, error) {
-	var domain string
+func revokedCertificateNameByID(db *sql.DB, id string) (string, error) {
+	var name string
 	var revokedAt sql.NullTime
-	err := db.QueryRow(`SELECT domain, revoked_at FROM certificates WHERE id = $1`, id).Scan(&domain, &revokedAt)
+	err := db.QueryRow(`SELECT name, revoked_at FROM certificates WHERE id = $1`, id).Scan(&name, &revokedAt)
 	if err != nil {
 		return "", err
 	}
 	if !revokedAt.Valid {
 		return "", errCertificateNotRevoked
 	}
-	return domain, nil
+	return name, nil
 }
 
 func permanentlyDeleteCertificate(db *sql.DB, id string) error {
@@ -189,7 +194,7 @@ func permanentlyDeleteCertificate(db *sql.DB, id string) error {
 	return nil
 }
 
-func certificatePEMByID(db *sql.DB, id string) (domain, certificatePEM string, err error) {
-	err = db.QueryRow(`SELECT domain, certificate_pem FROM certificates WHERE id = $1`, id).Scan(&domain, &certificatePEM)
-	return domain, certificatePEM, err
+func certificatePEMByID(db *sql.DB, id string) (name, certificatePEM string, err error) {
+	err = db.QueryRow(`SELECT name, certificate_pem FROM certificates WHERE id = $1`, id).Scan(&name, &certificatePEM)
+	return name, certificatePEM, err
 }

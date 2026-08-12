@@ -32,6 +32,35 @@ channel_history_mode() {
 # mostrado "AP-ENABLED" (sucesso de verdade, mesmo que o AP caia depois
 # por outro motivo, ex. beacon) ou nao (rejeitado pelo adaptador/driver
 # antes de sequer subir).
+# channel_failure_is_attributable decide se uma tentativa falha deve
+# CONTAR contra o canal no historico. Recebe o caminho do log do
+# create_ap dessa tentativa.
+#
+# Motivo: "AP-ENABLED ausente do log" era tratado como prova de que o
+# adaptador rejeitou o canal, e nao e. Qualquer coisa que mate o
+# create_ap antes do AP subir produz o mesmo sintoma - e ja aconteceu
+# de verdade: o dnsmasq morrendo por "cannot open log ... Permission
+# denied" gravou dezenas de falsas rejeicoes, uma por canal candidato,
+# envenenando o ranking de bandas a ponto de o hotspot passar a preferir
+# 5GHz numa placa onde 2.4GHz e que funcionava.
+#
+# Conservador de proposito: so descarta causas RECONHECIDAS como alheias
+# ao canal. Uma falha nova/desconhecida continua contando como rejeicao,
+# igual a antes - o custo de subestimar um canal ruim e bem menor que o
+# de nunca mais confiar no historico.
+channel_failure_is_attributable() {
+  local create_ap_log="$1"
+  [[ -f "${create_ap_log}" ]] || return 0
+
+  # Causas que se manifestam identicamente em TODOS os canais - contar
+  # qualquer uma delas contra o canal da vez e ruido puro.
+  local unrelated='cannot open log|Permission denied|RTNETLINK answers: Resource busy|can not be a station.*and an AP at the same time|is not an interface|Resource temporarily unavailable'
+  if grep -qEi "${unrelated}" "${create_ap_log}" 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
 record_channel_result() {
   local band="$1"
   local channel="$2"

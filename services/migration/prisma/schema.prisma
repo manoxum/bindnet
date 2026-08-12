@@ -44,6 +44,7 @@ model Ca {
 // POST /api/certificates no painel de gestao.
 model Certificate {
   id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String
   domain         String
   commonName     String    @map("common_name")
   dnsNames       String[]  @map("dns_names")
@@ -53,10 +54,13 @@ model Certificate {
   privateKeyPem  String    @map("private_key_pem")
   issuedAt       DateTime  @map("issued_at") @db.Timestamptz
   expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+  validityQuantity Int     @default(2) @map("validity_quantity")
+  validityUnit   String    @default("years") @map("validity_unit")
   revokedAt      DateTime? @map("revoked_at") @db.Timestamptz
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   @@index([domain])
+  @@index([name])
   @@map("certificates")
 }
 

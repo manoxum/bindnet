@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/button";
@@ -16,9 +17,19 @@ import type { IssueCertificateRequest } from "@/components/certificates/certific
 interface IssueCertificateFormProps {
   onSubmit: (request: IssueCertificateRequest) => void;
   pending: boolean;
+  defaultValues?: CertificateIssueFormValues;
+  submitLabel?: string;
+  lockName?: boolean;
 }
 
-export function IssueCertificateForm({ onSubmit, pending }: IssueCertificateFormProps) {
+export function IssueCertificateForm({
+  onSubmit,
+  pending,
+  defaultValues = emptyCertificateIssueForm,
+  submitLabel = "Emitir",
+  lockName = false,
+}: IssueCertificateFormProps) {
+  const fieldId = useId();
   const {
     register,
     handleSubmit,
@@ -26,7 +37,7 @@ export function IssueCertificateForm({ onSubmit, pending }: IssueCertificateForm
     formState: { errors },
   } = useForm<CertificateIssueFormValues>({
     resolver: zodResolver(certificateIssueFormSchema),
-    defaultValues: emptyCertificateIssueForm,
+    defaultValues,
   });
 
   return (
@@ -34,13 +45,28 @@ export function IssueCertificateForm({ onSubmit, pending }: IssueCertificateForm
       className="space-y-4"
       onSubmit={handleSubmit((values) => {
         onSubmit(formValuesToIssueCertificateRequest(values));
-        reset(emptyCertificateIssueForm);
+        if (!lockName) reset(emptyCertificateIssueForm);
       })}
     >
       <div className="space-y-2">
-        <Label htmlFor="domains">Domínios ou IPs</Label>
+        <Label htmlFor={`${fieldId}-certificate-name`}>Nome do certificado</Label>
+        <Input
+          id={`${fieldId}-certificate-name`}
+          placeholder="Portal interno"
+          readOnly={lockName}
+          aria-describedby={`${fieldId}-certificate-name-help`}
+          {...register("name")}
+        />
+        <p id={`${fieldId}-certificate-name-help`} className="text-xs text-muted-foreground">
+          Nome usado para identificar o certificado no Bindnet e no nginx-ui.
+        </p>
+        {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${fieldId}-domains`}>Domínios ou IPs</Label>
         <Textarea
-          id="domains"
+          id={`${fieldId}-domains`}
           rows={3}
           placeholder={"*.mydomain\napp.mydomain\napp2.mydomain"}
           {...register("domains")}
@@ -54,12 +80,18 @@ export function IssueCertificateForm({ onSubmit, pending }: IssueCertificateForm
 
       <div className="flex flex-wrap items-end gap-2">
         <div className="space-y-2">
-          <Label htmlFor="validityQuantity">Validade</Label>
-          <Input id="validityQuantity" type="number" min={1} className="w-24" {...register("validityQuantity")} />
+          <Label htmlFor={`${fieldId}-validity-quantity`}>Validade</Label>
+          <Input
+            id={`${fieldId}-validity-quantity`}
+            type="number"
+            min={1}
+            className="w-24"
+            {...register("validityQuantity")}
+          />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="validityUnit">Período</Label>
-          <SelectNative id="validityUnit" className="w-32" {...register("validityUnit")}>
+          <Label htmlFor={`${fieldId}-validity-unit`}>Período</Label>
+          <SelectNative id={`${fieldId}-validity-unit`} className="w-32" {...register("validityUnit")}>
             <option value="days">Dias</option>
             <option value="weeks">Semanas</option>
             <option value="months">Meses</option>
@@ -67,7 +99,7 @@ export function IssueCertificateForm({ onSubmit, pending }: IssueCertificateForm
           </SelectNative>
         </div>
         <Button type="submit" disabled={pending}>
-          Emitir
+          {submitLabel}
         </Button>
       </div>
       {errors.validityQuantity && <p className="text-sm text-destructive">{errors.validityQuantity.message}</p>}

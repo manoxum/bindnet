@@ -38,6 +38,23 @@ self_managed_regulatory_country() {
 # So loga e tenta desbloquear - nunca falha o script por si so, ja que
 # create_ap vai reportar o erro de qualquer forma se o desbloqueio nao
 # funcionar (ex.: bloqueio fisico genuino).
+# wifi_radio_blocked devolve 0 quando o radio Wi-Fi esta bloqueado por
+# rfkill agora. Usada por attempt_hotspot_cycle (entrypoint.sh) pra
+# desistir na hora em vez de gastar 5 ciclos x 11 canais candidatos
+# contra um radio desligado - nenhum canal funciona com o radio em
+# baixo, e cada tentativa ainda sujava o historico de canais com uma
+# falsa "rejeicao do adaptador".
+#
+# "|| true" no grep pelo mesmo motivo detalhado em
+# ensure_wifi_radio_unblocked abaixo: sob "set -euo pipefail" um grep
+# sem match mata o script inteiro em silencio.
+wifi_radio_blocked() {
+  command -v rfkill >/dev/null 2>&1 || return 1
+  local blocked
+  blocked="$(rfkill list wifi 2>/dev/null | grep -Ei 'blocked: yes' || true)"
+  [[ -n "${blocked}" ]]
+}
+
 ensure_wifi_radio_unblocked() {
   command -v rfkill >/dev/null 2>&1 || return 0
 
@@ -47,9 +64,27 @@ ensure_wifi_radio_unblocked() {
   # sem nenhuma mensagem de erro (confirmado ao vivo: o hotspot parava
   # de fazer qualquer coisa logo apos "Configuracao operacional...",
   # nunca chegando nem no diagnostico regulatorio nem em erro nenhum).
-  local blocked
-  blocked="$(rfkill list wifi 2>/dev/null | grep -Ei 'blocked: yes' || true)"
-  [[ -n "${blocked}" ]] || return 0
+  wifi_radio_blocked || return 0
+
+  # Desbloquear o radio e desfazer uma acao do usuario: se ele acabou de
+  # desligar o Wi-Fi no sistema (que faz rfkill do phy inteiro, matando
+  # tambem o AP - e o mesmo radio), religa-lo aqui faria o interruptor
+  # de Wi-Fi do sistema simplesmente nao funcionar enquanto o hotspot
+  # estivesse ligado. Por isso o desbloqueio automatico vale SO quando o
+  # operador pediu o hotspot explicitamente pelo painel
+  # (HOTSPOT_START_REASON=manual, propagado pelo worker no "docker exec"
+  # - ver ExecHotspotEntrypoint em internal/compose/compose.go); num
+  # autostart de boot ou numa auto-recuperacao, respeita o bloqueio e
+  # espera o radio voltar.
+  #
+  # O caso que originou esta funcao continua coberto: um bloqueio
+  # espurio deixado por um "docker compose up --build" e destravado no
+  # proximo start pelo painel, que e como o operador reage a "o hotspot
+  # nao sobe".
+  if [[ "${HOTSPOT_START_REASON:-auto}" != "manual" ]]; then
+    log "AVISO: radio Wi-Fi bloqueado via rfkill, mas este start nao foi pedido pelo painel (autostart/auto-recuperacao) - respeitando o bloqueio em vez de religar o radio por conta propria. O hotspot sobe sozinho assim que o Wi-Fi for religado."
+    return 0
+  fi
 
   log "AVISO: radio Wi-Fi esta bloqueado via rfkill (soft ou hard) - todos os canais/bandas falhariam igualmente com erros genericos do driver. Tentando desbloquear via software."
   rfkill unblock wifi >/dev/null 2>&1 || true

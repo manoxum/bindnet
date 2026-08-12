@@ -30,6 +30,8 @@ export function hotspotConfigDefaults(
     WIFI_FREQ_BAND: data.WIFI_FREQ_BAND ?? "auto",
     WIFI_CHANNEL_CANDIDATES: data.WIFI_CHANNEL_CANDIDATES ?? "",
     WIFI_AP_MODE: data.WIFI_AP_MODE === "virtual" ? "virtual" : "auto",
+    WIFI_ANCHOR_SSID: data.WIFI_ANCHOR_SSID ?? "",
+    WIFI_ANCHOR_CHANNEL: data.WIFI_ANCHOR_CHANNEL ?? "",
     HOTSPOT_GATEWAY: data.HOTSPOT_GATEWAY || "192.168.12.1",
     HOTSPOT_CIDR: data.HOTSPOT_CIDR || "192.168.12.0/24",
     HOTSPOT_DNS_FALLBACKS: data.HOTSPOT_DNS_FALLBACKS ?? "1.1.1.1,8.8.8.8",

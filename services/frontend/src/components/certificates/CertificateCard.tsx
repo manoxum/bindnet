@@ -1,4 +1,4 @@
-import { Download, ShieldCheck, ShieldX, Trash2 } from "lucide-react";
+import { Download, Pencil, ShieldCheck, ShieldX, Trash2 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { allCertificateDomains, type Certificate } from "@/components/certificates/certificate-types";
@@ -11,6 +11,7 @@ interface CertificateCardProps {
   permanentDeletePending?: boolean;
   onRevoke?: (id: string) => void;
   onPermanentDelete?: (id: string) => void;
+  onEdit?: (certificate: Certificate) => void;
 }
 
 function CertificateCard({
@@ -20,8 +21,9 @@ function CertificateCard({
   permanentDeletePending = false,
   onRevoke,
   onPermanentDelete,
+  onEdit,
 }: CertificateCardProps) {
-  const extraDomains = allCertificateDomains(certificate).filter((name) => name !== certificate.domain);
+  const domains = allCertificateDomains(certificate);
   return (
     <div className="rounded-lg border bg-card p-4 text-card-foreground shadow-sm transition hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
@@ -33,13 +35,13 @@ function CertificateCard({
               <ShieldCheck className="h-4 w-4 text-primary" />
             )}
           </div>
-          <p className="truncate font-medium">{certificate.domain}</p>
+          <p className="truncate font-medium">{certificate.name}</p>
         </div>
         <Badge variant={revoked ? "secondary" : "success"}>{revoked ? "revogado" : "válido"}</Badge>
       </div>
-      {extraDomains.length > 0 && (
-        <p className="mt-2 truncate text-xs text-muted-foreground" title={extraDomains.join(", ")}>
-          + {extraDomains.join(", ")}
+      {domains.length > 0 && (
+        <p className="mt-2 truncate text-xs text-muted-foreground" title={domains.join(", ")}>
+          {domains.join(", ")}
         </p>
       )}
       <p className="mt-3 text-xs text-muted-foreground">
@@ -65,9 +67,21 @@ function CertificateCard({
             Eliminar
           </Button>
         ) : (
-          <Button variant="destructive" size="sm" disabled={revokePending} onClick={() => onRevoke?.(certificate.id)}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <>
+            <Button variant="outline" size="sm" onClick={() => onEdit?.(certificate)}>
+              <Pencil className="h-4 w-4" />
+              Editar
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              aria-label={`Revogar ${certificate.name}`}
+              disabled={revokePending}
+              onClick={() => onRevoke?.(certificate.id)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </>
         )}
       </div>
     </div>

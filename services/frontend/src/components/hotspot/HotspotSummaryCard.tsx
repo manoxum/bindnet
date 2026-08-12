@@ -27,6 +27,12 @@ const SECURITY_OPTIONS: InterfaceQuickSwitchOption[] = [
 interface HotspotSummaryCardProps {
   config: Record<string, string>;
   running: boolean;
+  // "starting" = o serviço do hotspot está vivo mas o AP ainda não
+  // subiu (ou caiu e está a ser retentado). O worker reporta isto
+  // separado de ligado/desligado de propósito — mostrá-lo como
+  // "ligado", como se fazia antes, era o que dava a impressão de que o
+  // painel não reconhecia que o hotspot tinha parado.
+  starting?: boolean;
   startPending: boolean;
   stopPending: boolean;
   recoverPending: boolean;
@@ -76,6 +82,7 @@ function ConfigItem({ icon: Icon, label, value }: { icon: LucideIcon; label: str
 export function HotspotSummaryCard({
   config,
   running,
+  starting = false,
   startPending,
   stopPending,
   recoverPending,
@@ -103,7 +110,9 @@ export function HotspotSummaryCard({
             <CardTitle>Configuração atual</CardTitle>
             <CardDescription>Valores em vigor no hotspot neste momento.</CardDescription>
           </div>
-          <Badge variant={running ? "success" : "secondary"}>{running ? "ligado" : "desligado"}</Badge>
+          <Badge variant={starting ? "default" : running ? "success" : "secondary"}>
+            {starting ? "a iniciar…" : running ? "ligado" : "desligado"}
+          </Badge>
         </div>
         <HotspotSummaryActions
           running={running}

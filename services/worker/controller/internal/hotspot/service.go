@@ -71,7 +71,20 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 			unmanageWifiInterfaceIfIdle(config["WIFI_INTERFACE"], config["INTERNET_INTERFACE"], config["WIFI_AP_MODE"])
 		}
 
-		output, err := compose.ExecHotspotEntrypoint(action)
+		// startReason distingue "o operador clicou Iniciar no painel" de
+		// "o backend religou sozinho" (autostart de boot ou
+		// auto-recuperacao). So o primeiro autoriza o entrypoint a
+		// desbloquear o radio via rfkill - ver
+		// ensure_wifi_radio_unblocked em
+		// services/worker/hotspot/regulatory.sh. Qualquer valor que nao
+		// seja exatamente "manual" e tratado como automatico (o mais
+		// conservador: na duvida, nao mexe no radio do usuario).
+		startReason := "auto"
+		if config["_START_REASON"] == "manual" {
+			startReason = "manual"
+		}
+
+		output, err := compose.ExecHotspotEntrypoint(action, "HOTSPOT_START_REASON="+startReason)
 		if err != nil {
 			log.Printf("[worker] erro ao executar hotspot %s: %v (%s)", action, err, output)
 			http.Error(w, strings.TrimSpace(string(output)), http.StatusBadGateway)

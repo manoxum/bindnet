@@ -305,6 +305,51 @@ Regras:
   usa contra a saída de `iw phy info` (`{` sem bound válido) e sempre
   falha, fazendo o hotspot concluir erroneamente, em qualquer
   adaptador, que o modo concorrente não é suportado.
+- **`WIFI_ANCHOR_SSID` / `WIFI_ANCHOR_CHANNEL` — a "rede âncora".** Num
+  rádio único o AP e a associação de estação dividem a mesma frequência
+  (`#channels <= 1`), então **o canal do AP decide a quais redes a
+  máquina consegue se associar** enquanto o hotspot está no ar. A
+  seleção automática ranqueia por *menor* interferência, ou seja, escolhe
+  o canal onde não há rede nenhuma — o pior possível para esse fim.
+  Confirmado ao vivo: com 15 redes visíveis e nenhuma no canal 1, o
+  hotspot subiu no canal 1 e a máquina deixou de conseguir se associar a
+  qualquer uma (router de casa no 10, outro hotspot no 11).
+  - Com âncora configurada, `attempt_hotspot_cycle` sobe o AP no canal
+    dela (`anchor_band_channel`, `anchor.sh`) em vez de varrer por
+    interferência. Se esse canal falhar, cai na varredura normal.
+  - A ordem de prioridade é: `WIFI_CHANNEL` fixo → canal da estação já
+    associada → **âncora** → ranking por interferência. A estação vem
+    antes da âncora porque ali não é preferência, é física: o rádio já
+    está sintonizado naquele canal.
+  - `WIFI_ANCHOR_CHANNEL` é o canal **memorizado**, gravado pelo painel
+    no momento em que o operador escolhe a rede. É ele que o hotspot usa
+    — e não uma varredura feita na subida, que derrubaria o beacon do
+    próprio AP. Também é o que faz o hotspot subir no canal certo quando
+    a rede âncora está fora do ar (router desligado, máquina noutro
+    lugar); routers raramente mudam de canal. Sem canal memorizado, o
+    hotspot avisa e cai na seleção automática.
+  - O canal memorizado é **reconferido imediatamente antes de cada
+    subida** (`refreshAnchorChannel`, `hotspot_anchor.go`, chamada por
+    `hotspotConfigWithStartReason` — cobre start manual, autostart e
+    auto-recuperação). Sem isso, um router que trocasse de canal deixaria
+    a âncora envelhecer em silêncio e o sintoma seria idêntico ao de não
+    ter âncora nenhuma, sem nada no log a explicar. Não existe versão
+    periódica disso de propósito: com o AP já no ar, mudar de canal
+    exigiria derrubar todos os clientes. É best-effort — sem worker, sem
+    NetworkManager ou com a rede fora do ar, o canal memorizado continua
+    valendo, que é exatamente o fallback desenhado.
+  - O seletor do painel (`HotspotAnchorField.tsx`, aba **Rádio**) é
+    alimentado por `GET /api/hotspot/wifi-scan` → `GET
+    /network/wifi-scan` no worker, que lê o **cache** do NetworkManager
+    (`nmcli ... --rescan no`) e **nunca** força varredura. Redes com o
+    mesmo SSID (mesh/repetidor) aparecem uma vez, a de sinal mais forte;
+    SSID oculto é descartado.
+  - **Limitação aceita**: dá acesso a **uma** rede de cada vez. Redes em
+    canais diferentes ficam inalcançáveis com o hotspot no ar (na casa
+    do usuário, `WIFI2.4` está no canal 10 e `Jorge` no 11 — ancorar
+    numa torna a outra inacessível). Não existe seguidor de canal
+    automático, por decisão: mover o AP derrubaria todos os clientes do
+    hotspot a cada troca.
 - **Ordem STA → AP é a única suportada num rádio único.**
   `warn_ap_sta_channel_lock` (`radio_caps.sh`, chamada na subida) lê o
   `#channels <= N` da combinação que inclui `AP` em `iw phy<N> info` e,
@@ -462,6 +507,55 @@ Regras:
     duas camadas. Esta camada **não** depende do interruptor de arranque
     automático (ver seção própria abaixo): ele governa só o arranque do
     backend, nunca a recuperação de uma queda.
+  - **O estado `starting` também é recuperado.** `status_service`
+    reporta três estados: `running` (serviço vivo *e* instância do
+    `create_ap` no ar), `starting` (serviço vivo, nenhum `create_ap`) e
+    `stopped`. `starting` é legítimo por alguns segundos em todo start,
+    mas ficar **preso** nele era um buraco: o runner continuava vivo
+    retentando, o worker continuava respondendo `running: true`, e a
+    Camada 2 — que só agia com `running: false` — nunca disparava. Do
+    lado do operador isso aparecia como "o painel diz ligado mas não
+    está, e não recupera sozinho": a única saída era Parar e Iniciar na
+    mão. Agora `reconcileHotspotService`
+    (`hotspot_reconcile_service.go`) cronometra o estado e, passados
+    `hotspotStartingGrace` (60s), força um `restart` — o mesmo caminho
+    que o operador usaria à mão, e que mata o runner preso antes de
+    subir outro (um `start` sozinho só responderia "Servico do hotspot
+    ja esta em execucao"). O painel também deixou de mentir: mostra
+    **"a iniciar…"** em vez de "ligado".
+  - **Rádio bloqueado (`rfkill`) desiste na hora.**
+    `attempt_hotspot_cycle` checa `wifi_radio_blocked` (`regulatory.sh`)
+    antes de qualquer tentativa e devolve falha definitiva. Sem isso,
+    desligar o Wi-Fi no sistema — que faz `rfkill` do phy inteiro e
+    portanto mata o AP, é o mesmo rádio — fazia cada ciclo torrar os 11
+    canais candidatos das duas bandas, gastando minutos e gravando 11
+    falsas "rejeições do adaptador" por ciclo no histórico de canais.
+    Quem religa é a Camada 2, que tenta de novo a cada 15s e tem
+    sucesso no instante em que o Wi-Fi voltar.
+  - **O desbloqueio automático de `rfkill` vale só no start pedido pelo
+    operador** (`HOTSPOT_START_REASON=manual`, propagado pelo backend no
+    corpo de `/hotspot/start` e pelo worker no `docker exec -e`).
+    Desbloquear numa auto-recuperação desfaria a ação de quem acabou de
+    desligar o Wi-Fi: o interruptor de Wi-Fi do sistema simplesmente
+    deixaria de funcionar enquanto o hotspot estivesse ligado. O caso
+    que originou o desbloqueio (bloqueio espúrio deixado por um
+    `docker compose up --build`) continua coberto — é destravado no
+    próximo start pelo painel, que é como o operador reage a "o hotspot
+    não sobe".
+  - **Falha só conta contra o canal quando é mesmo do canal.**
+    `channel_failure_is_attributable` (`history.sh`) filtra, antes de
+    gravar em `hotspot_channel_history`, as causas reconhecidamente
+    alheias ao canal (`cannot open log`/`Permission denied`,
+    `RTNETLINK ... Resource busy`, `can not be a station ... and an AP`,
+    `is not an interface`). "AP-ENABLED ausente do log" **não** é prova
+    de rejeição do adaptador: qualquer coisa que mate o `create_ap`
+    antes do AP subir produz o mesmo sintoma. Isso já aconteceu de
+    verdade — o `dnsmasq` morrendo por permissão de log gravou centenas
+    de falsas rejeições (o canal 10, que funciona, chegou a 274 falhas
+    contra 11 sucessos), envenenando o ranking de bandas a ponto de o
+    hotspot passar a preferir 5GHz numa placa onde 2.4GHz é que
+    funcionava. O filtro é conservador: causa nova/desconhecida
+    continua contando como rejeição.
 
 ## Ligar/desligar/recuperar o hotspot pelo painel (`POST /api/hotspot/start` / `/stop` / `/recover-wifi`)
 
@@ -1240,12 +1334,14 @@ Regras:
      parâmetros criptográficos do antigo `cert-proxy`. Trocar o CN depois
      não renomeia nem reemite a CA já criada — só valeria para uma CA
      gerada do zero.
-- `POST /api/certificates` emite um certificado *leaf* (RSA 2048) a
-  partir de `domains` (lista de domínios/IPs) — todos os itens viram
+- `POST /api/certificates` emite um certificado *leaf* (RSA 2048) com
+  um `name` amigável obrigatório, separado dos `domains` (lista de
+  domínios/IPs) — todos os itens viram
   SAN (Subject Alternative Name) de um único certificado; o primeiro
-  item normalizado é o domínio/CN primário, salvo na coluna `domain` e
-  usado como nome de referência nas listagens e na importação para o
-  `nginx-ui`. Um item pode ser um domínio curinga (`*.mydomain`) —
+  item normalizado é o domínio/CN primário, salvo na coluna `domain`;
+  `name` identifica a linha nas listagens e na importação para o
+  `nginx-ui`. Não pode haver dois certificados ativos com o mesmo
+  nome. Um item pode ser um domínio curinga (`*.mydomain`) —
   cobre o caso de emitir um certificado para `*.mydomain` junto com
   `app.mydomain`, `app2.mydomain` etc. em uma única emissão. Sempre
   cria uma linha nova em `certificates` — sem cache/reuso por domínio,
@@ -1254,12 +1350,18 @@ Regras:
   (`days`|`weeks`|`months`|`years`) definem `NotAfter`; ausentes ou
   inválidos caem para o padrão fixo anterior (2 anos), e o resultado
   nunca ultrapassa a validade da própria CA local.
+- `PUT /api/certificates/{id}` reemite um certificado ativo: preserva
+  seu nome amigável, gera uma chave e um certificado completamente
+  novos com os novos `domains`/período de validade e move a versão
+  anterior para os revogados. O material novo substitui o anterior no
+  `nginx-ui`; eliminar definitivamente a versão antiga não remove esse
+  material enquanto a nova versão com o mesmo nome continuar ativa.
 - Após persistir no Postgres, o backend importa o certificado para o
   `nginx-ui`, para que ele apareça em
   `/#/certificates/list?search={}`. Se as credenciais do `nginx-ui`
   estiverem definidas no painel (Configurações, tabela `panel_config`:
   `NGINX_UI_USERNAME`/`NGINX_UI_PASSWORD`), usa a API `/api/certs`;
-  caso contrário, grava os PEMs em `/etc/nginx/ssl/<domínio primário>/`
+  caso contrário, grava os PEMs em `/etc/nginx/ssl/<nome>/`
   e registra a linha correspondente (com todos os SANs em `domains`) no
   `database.db` do `nginx-ui` via os volumes compartilhados.
 - Cada domínio/IP é normalizado antes de emitir: minúsculas, sem
@@ -1273,7 +1375,7 @@ Regras:
   listagem dedicada de revogados do Bindnet, com status "revogado", e
   sai da lista principal de certificados emitidos. A mesma chamada
   remove o certificado da lista do `nginx-ui` e limpa os PEMs importados
-  em `/etc/nginx/ssl/<domínio>/`.
+  em `/etc/nginx/ssl/<nome>/`.
 - `DELETE /api/certificates/{id}/permanent` elimina definitivamente
   uma linha **somente se ela já estiver revogada**; certificados ativos
   precisam passar primeiro pela revogação para sair do `nginx-ui`.

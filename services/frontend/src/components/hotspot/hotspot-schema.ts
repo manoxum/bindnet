@@ -17,6 +17,8 @@ export const configSchema = z
     WIFI_FREQ_BAND: z.string().min(1),
     WIFI_CHANNEL_CANDIDATES: z.string(),
     WIFI_AP_MODE: z.enum(["auto", "virtual"]),
+    WIFI_ANCHOR_SSID: z.string(),
+    WIFI_ANCHOR_CHANNEL: z.string(),
     HOTSPOT_GATEWAY: z.string().min(1, "Informe o gateway do hotspot"),
     HOTSPOT_CIDR: z.string().min(1, "Informe a faixa CIDR do hotspot"),
     HOTSPOT_DNS_FALLBACKS: z.string(),

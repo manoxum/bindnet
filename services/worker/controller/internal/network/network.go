@@ -17,6 +17,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /network/wifi-unmanage", handleWifiUnmanage)
 	mux.HandleFunc("POST /network/wifi-manage", handleWifiManage)
 	mux.HandleFunc("POST /network/dns-test", handleDNSTest)
+	RegisterWifiScanRoute(mux)
 }
 
 type interfaceInfo struct {

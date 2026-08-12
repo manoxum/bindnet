@@ -133,31 +133,31 @@ func fetchNginxUIPublicKey() (*rsa.PublicKey, error) {
 // credenciais do nginx-ui estiverem configuradas, usa a API oficial. Sem
 // credenciais, importa diretamente no estado compartilhado do nginx-ui
 // (database.db + /etc/nginx/ssl) para que o certificado apareca na tela
-// /#/certificates/list logo apos a emissao no painel Bindnet. domain e o
-// dominio/CN primario (usado no nome/caminho); sanDomains e a lista
+// /#/certificates/list logo apos a emissao no painel Bindnet. name e o
+// nome amigavel (usado no nome/caminho); sanDomains e a lista
 // completa de dominios/IPs do certificado (SAN), incluindo o primario -
 // so usada para preencher a coluna "domains" do nginx-ui.
-func syncCertificateToNginxUI(db *sql.DB, domain string, sanDomains []string, certificatePEM, privateKeyPEM string) error {
+func syncCertificateToNginxUI(db *sql.DB, name string, sanDomains []string, certificatePEM, privateKeyPEM string) error {
 	if nginxUIConfigured(db) {
-		if err := syncCertificateToNginxUIAPI(db, domain, certificatePEM, privateKeyPEM); err == nil {
+		if err := syncCertificateToNginxUIAPI(db, name, certificatePEM, privateKeyPEM); err == nil {
 			return nil
 		} else {
-			log.Printf("[backend] sync via API do nginx-ui falhou para %s, tentando importacao local: %v", domain, err)
+			log.Printf("[backend] sync via API do nginx-ui falhou para %s, tentando importacao local: %v", name, err)
 		}
 	}
 
-	return syncCertificateToNginxUILocal(domain, sanDomains, certificatePEM, privateKeyPEM)
+	return syncCertificateToNginxUILocal(name, sanDomains, certificatePEM, privateKeyPEM)
 }
 
-func syncCertificateToNginxUIAPI(db *sql.DB, domain, certificatePEM, privateKeyPEM string) error {
+func syncCertificateToNginxUIAPI(db *sql.DB, name, certificatePEM, privateKeyPEM string) error {
 	token, err := nginxUILogin(db)
 	if err != nil {
 		return err
 	}
 
-	certPath, keyPath := nginxUICertificatePaths(domain)
+	certPath, keyPath := nginxUICertificatePaths(name)
 	payload, err := json.Marshal(map[string]string{
-		"name":                     domain,
+		"name":                     name,
 		"ssl_certificate_path":     certPath,
 		"ssl_certificate_key_path": keyPath,
 		"ssl_certificate":          certificatePEM,
@@ -183,6 +183,6 @@ func syncCertificateToNginxUIAPI(db *sql.DB, domain, certificatePEM, privateKeyP
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("nginx-ui respondeu %d ao cadastrar certificado", resp.StatusCode)
 	}
-	log.Printf("[backend] certificado de %s carregado no nginx-ui", domain)
+	log.Printf("[backend] certificado %s carregado no nginx-ui", name)
 	return nil
 }

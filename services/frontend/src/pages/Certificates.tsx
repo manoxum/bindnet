@@ -7,7 +7,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CertificateList } from "@/components/certificates/CertificateList";
 import { IssueCertificateForm } from "@/components/certificates/IssueCertificateForm";
-import type { Certificate, IssueCertificateRequest } from "@/components/certificates/certificate-types";
+import { ReissueCertificateDialog } from "@/components/certificates/ReissueCertificateDialog";
+import type {
+  Certificate,
+  IssueCertificateRequest,
+  ReissueCertificateRequest,
+} from "@/components/certificates/certificate-types";
 import { api, ApiError } from "@/lib/api";
 import { usePageHeader } from "@/hooks/usePageHeader";
 import { useUrlTab } from "@/hooks/useUrlTab";
@@ -15,11 +20,12 @@ import { useUrlTab } from "@/hooks/useUrlTab";
 export function CertificatesPage() {
   usePageHeader({
     title: "Certificados (CA local)",
-    description: "Emita, liste, revogue e baixe certificados assinados pela CA local do painel.",
+    description: "Emita, reemita, revogue e baixe certificados assinados pela CA local do painel.",
   });
 
   const queryClient = useQueryClient();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [certificateToEdit, setCertificateToEdit] = useState<Certificate | null>(null);
   const [tab, setTab] = useUrlTab("issued");
 
   const certificates = useQuery<Certificate[]>({
@@ -52,6 +58,18 @@ export function CertificatesPage() {
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao revogar"),
   });
 
+  const reissue = useMutation({
+    mutationFn: ({ id, request }: { id: string; request: ReissueCertificateRequest }) =>
+      api.put(`/certificates/${id}`, request),
+    onSuccess: () => {
+      toast.success("Certificado reemitido.");
+      setCertificateToEdit(null);
+      queryClient.invalidateQueries({ queryKey: ["certificates"] });
+      queryClient.invalidateQueries({ queryKey: ["certificates", "revoked"] });
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao reemitir certificado"),
+  });
+
   const permanentDelete = useMutation({
     mutationFn: (id: string) => api.del(`/certificates/${id}/permanent`),
     onSuccess: () => {
@@ -74,8 +92,8 @@ export function CertificatesPage() {
         <CardHeader>
           <CardTitle>Emitir certificado</CardTitle>
           <CardDescription>
-            Emite um novo certificado assinado pela CA local para um ou mais domínios/IPs (inclusive curinga), com o
-            período de validade escolhido.
+            Defina um nome e emita um certificado assinado pela CA local para um ou mais domínios/IPs (inclusive
+            curinga), com o período de validade escolhido.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -106,6 +124,7 @@ export function CertificatesPage() {
                 emptyMessage="Nenhum certificado emitido ainda."
                 revokePending={revoke.isPending}
                 onRevoke={(id) => revoke.mutate(id)}
+                onEdit={setCertificateToEdit}
               />
             </TabsContent>
             <TabsContent value="revoked">
@@ -131,6 +150,12 @@ export function CertificatesPage() {
         variant="destructive"
         pending={permanentDelete.isPending}
         onConfirm={() => confirmDeleteId && permanentDelete.mutate(confirmDeleteId)}
+      />
+      <ReissueCertificateDialog
+        certificate={certificateToEdit}
+        pending={reissue.isPending}
+        onOpenChange={(open) => !open && setCertificateToEdit(null)}
+        onSubmit={(id, request) => reissue.mutate({ id, request })}
       />
     </div>
   );

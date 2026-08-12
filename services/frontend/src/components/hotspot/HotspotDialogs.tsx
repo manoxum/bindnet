@@ -1,4 +1,4 @@
-import type { FieldErrors, UseFormHandleSubmit, UseFormRegister } from "react-hook-form";
+import type { FieldErrors, UseFormHandleSubmit, UseFormRegister, UseFormSetValue, UseFormWatch } from "react-hook-form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { HotspotConfigForm } from "@/components/hotspot/HotspotConfigForm";
@@ -9,6 +9,8 @@ interface HotspotDialogsProps {
   configOpen: boolean;
   onConfigOpenChange: (open: boolean) => void;
   register: UseFormRegister<ConfigForm>;
+  setValue: UseFormSetValue<ConfigForm>;
+  watch: UseFormWatch<ConfigForm>;
   errors: FieldErrors<ConfigForm>;
   handleSubmit: UseFormHandleSubmit<ConfigForm>;
   onSave: (data: ConfigForm) => void;
@@ -34,6 +36,8 @@ export function HotspotDialogs({
   configOpen,
   onConfigOpenChange,
   register,
+  setValue,
+  watch,
   errors,
   handleSubmit,
   onSave,
@@ -62,6 +66,8 @@ export function HotspotDialogs({
           </DialogHeader>
           <HotspotConfigForm
             register={register}
+            setValue={setValue}
+            watch={watch}
             errors={errors}
             handleSubmit={handleSubmit}
             onSave={onSave}
