@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 export interface DnsRecord {
   hostname: string;
   address: string;
+  configuredAddress: string | null;
   loopbackOffset: number;
   createdAt: string;
 }

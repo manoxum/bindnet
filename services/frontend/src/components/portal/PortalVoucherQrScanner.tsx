@@ -22,10 +22,9 @@ type ScanError = "insecure-context" | "camera-unavailable" | null;
 // (RULE.md, secao do portal cativo), entao a camera nunca funciona
 // aqui quando acessado pelo IP do gateway do hotspot. Detectamos isso
 // antes de tentar (em vez de deixar o erro generico do getUserMedia
-// aparecer) e oferecemos abrir client.bindnet.local via HTTPS num
+// aparecer) e oferecemos abrir bindnet.local.com via HTTPS num
 // navegador completo - dominio com certificado da CA local, exposto
-// pelo nginx-ui (ver /etc/nginx/sites-available/client.bindnet.local
-// no container nginx-ui) e resolvido automaticamente pelo
+// pelo nginx-ui (ver services/gateway/nginx-ui-site.conf) e resolvido automaticamente pelo
 // dns-provider por cair em DNS_LOCAL_TLDS (RULE.md, secao
 // dns-provider). O usuario precisa aceitar manualmente o aviso de
 // certificado nao confiavel uma vez; dai em diante a camera funciona.
@@ -61,7 +60,7 @@ export function PortalVoucherQrScanner({ open, onOpenChange, onScan }: PortalVou
     };
   }, [open, onScan, onOpenChange]);
 
-  const secureUrl = "https://client.bindnet.local/portal";
+  const secureUrl = "https://bindnet.local.com/";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

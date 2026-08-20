@@ -2,7 +2,6 @@ package hotspot
 
 import (
 	"bindnet/backend/internal/hotspot/store"
-	"bindnet/backend/internal/platform/config"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -52,22 +51,12 @@ func resolvePortalMAC(ctx context.Context, r *http.Request, db *sql.DB, worker *
 	return "", errPortalDeviceNotIdentified
 }
 
-// hotspotPortalURL monta o endereco publico da pagina de
-// autoatendimento a partir do HOTSPOT_GATEWAY configurado (mesma
-// config lida por store.HotspotWifiInterface) - usado pelo worker como alvo
-// do redirect do portal cativo (ver applyCaptivePortalRedirect em
-// hotspot_credit_recharge.go). FRONTEND_PORT segue o mesmo default
-// (9090) do docker-compose.services.yml.
-func hotspotPortalURL(ctx context.Context, db *sql.DB) (string, error) {
-	hotspotCfg, err := store.GetHotspotConfig(ctx, db)
-	if err != nil {
-		return "", err
-	}
-	gateway := strings.TrimSpace(hotspotCfg["HOTSPOT_GATEWAY"])
-	if gateway == "" {
-		gateway = "192.168.12.1"
-	}
-	return "http://" + gateway + ":" + config.Getenv("FRONTEND_PORT", "9090") + "/portal", nil
+// hotspotPortalURL devolve o endereco publico dedicado do portal. O
+// redirect deve passar pelo nginx-ui/gateway com este Host, nunca pela
+// porta direta do frontend: e o hostname que separa o portal da area
+// administrativa.
+func hotspotPortalURL() string {
+	return "http://bindnet.local.com/"
 }
 
 func clientIPFromRequest(r *http.Request) string {

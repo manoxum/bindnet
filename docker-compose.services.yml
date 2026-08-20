@@ -160,12 +160,44 @@ services:
     depends_on:
       - backend
 
+  # gateway: decide qual servico interno atende cada dominio do Bindnet.
+  # O nginx-ui termina o TLS e repassa bindnet.local.com e
+  # admin.bindnet.local.com para ca pela rede wnet (alias abaixo); daqui
+  # o roteamento por Host escolhe entre portal cativo e painel de
+  # administracao. Ver services/gateway/nginx.conf.template.
+  #
+  # Fica nas DUAS redes de proposito: "wnet" e por onde o nginx-ui o
+  # alcanca por nome, e "proxy" e por onde ele alcanca o host
+  # (10.91.0.1), ja que frontend e backend rodam com network_mode: host
+  # e nao tem nome de servico Docker.
+  #
+  # Sem "ports:": o gateway nao e exposto ao host nem a rede do hotspot.
+  # A unica porta publica continua sendo a do nginx-ui (80/443).
+  gateway:
+    image: ${DOCKERHUB:-zootakuxy}/private:bindnet-gateway-${STAGE:-main}-${VERSION:-latest}
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      FRONTEND_PORT: ${FRONTEND_PORT:-9090}
+      BACKEND_PORT: ${BACKEND_PORT:-8090}
+    networks:
+      proxy:
+      wnet:
+        aliases:
+          - "${STAGE:-main}.gateway.bindnet.wnet"
+    depends_on:
+      - frontend
+
 networks:
   proxy:
     driver: bridge
     ipam:
       config:
         - subnet: 10.91.0.0/24
+  wnet:
+    external: true
 
 volumes:
   nginx_config:

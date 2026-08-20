@@ -2,7 +2,7 @@
 // portal cativo por-MAC ja existente do bloqueio de credito/cota
 // (applyCaptivePortalRedirect em hotspot_credit_recharge.go) - o
 // dispositivo recebe o balao "Entrar na rede" do proprio SO e cai no
-// /portal, onde ve o aviso. NAO ha alteracao de DNS nem interceptacao L7.
+// bindnet.local.com, onde ve o aviso. NAO ha alteracao de DNS nem interceptacao L7.
 // O redirect e "possuido" originalmente pelos reconciles de credito/cota;
 // por isso, ao desligar o push de um aviso, so removemos o redirect se
 // nenhum desses bloqueios ainda o quiser ligado.
@@ -20,7 +20,7 @@ import (
 // avisos urgentes pendentes. targetMAC vazio (broadcast) reconcilia todos
 // os dispositivos conectados agora; preenchido, so aquele MAC.
 // Best-effort: so loga em falha, ja que a entrega base do aviso e sempre
-// o /portal.
+// o portal em bindnet.local.com.
 func reconcileMessageCaptivePush(ctx context.Context, db *sql.DB, worker *workerapi.Client, targetMAC string) {
 	macs, err := pushReconcileTargets(ctx, db, worker, targetMAC)
 	if err != nil {

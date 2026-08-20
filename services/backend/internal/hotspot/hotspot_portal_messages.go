@@ -1,6 +1,6 @@
 // hotspot_portal_messages.go expoe as rotas publicas (sem sessao) de
 // avisos - a metade de "pull" da entrega: o dispositivo conectado le, na
-// pagina de autoatendimento /portal, os avisos direcionados a ele ou em
+// pagina de autoatendimento bindnet.local.com, os avisos direcionados a ele ou em
 // broadcast, e confirma a leitura. Mesmo precedente restrito de
 // hotspot_portal.go: o MAC do chamador nunca vem do corpo/query, e sempre
 // resolvido no servidor a partir do IP de origem (resolvePortalMAC).

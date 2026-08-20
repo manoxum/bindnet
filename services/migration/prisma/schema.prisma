@@ -75,6 +75,7 @@ model LocalDnsRecord {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   hostname       String   @unique
   loopbackOffset Int      @unique @map("loopback_offset")
+  address        String?  @db.Inet
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@map("local_dns_records")

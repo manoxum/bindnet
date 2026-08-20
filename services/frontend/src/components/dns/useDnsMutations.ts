@@ -32,7 +32,7 @@ export function useDnsMutations() {
   });
 
   const addRecord = useMutation({
-    mutationFn: (hostname: string) => api.post<DnsRecord>("/dns/records", { hostname }),
+    mutationFn: ({ hostname, address }: { hostname: string; address?: string }) => api.post<DnsRecord>("/dns/records", { hostname, address }),
     onSuccess: () => {
       toast.success("Registro adicionado.");
       queryClient.invalidateQueries({ queryKey: ["dns", "records"] });

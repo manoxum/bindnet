@@ -1,7 +1,7 @@
 // hotspot_messages.go expoe o CRUD de avisos que o operador envia aos
 // dispositivos conectados (rotas de admin, protegidas por sessao). A
 // entrega em si acontece em dois lugares: o dispositivo le o aviso na
-// pagina publica /portal (hotspot_portal_messages.go) e, para avisos
+// pagina publica bindnet.local.com (hotspot_portal_messages.go) e, para avisos
 // urgentes, tambem via push do portal cativo (hotspot_messages_push.go).
 package hotspot
 

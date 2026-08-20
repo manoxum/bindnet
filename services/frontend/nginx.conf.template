@@ -17,8 +17,31 @@ server {
         proxy_buffering off;
     }
 
+    # Assets com hash no nome (assets/index-<hash>.js) podem ser
+    # cacheados para sempre: qualquer mudanca no conteudo gera um nome
+    # novo, entao nunca ha versao velha servida sob o mesmo caminho.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
     # SPA: qualquer rota desconhecida cai no index.html (react-router).
+    #
+    # "no-cache" no index.html e obrigatorio, nao otimizacao: ele e o
+    # unico arquivo com nome fixo, e e ele que aponta para o bundle
+    # atual. Servido sem Cache-Control (como estava), o browser aplica
+    # cache heuristico a partir do Last-Modified e pode nem revalidar -
+    # ficando com um index.html velho que carrega um bundle que ja nao
+    # existe, ou pior, uma versao antiga da aplicacao inteira. Foi
+    # exatamente isso que fez bindnet.local.com continuar a abrir a
+    # area administrativa depois de o frontend ja separar as superficies
+    # por hostname (appSurfaceForHostname em src/lib/app-hostname.ts):
+    # o servidor estava certo, o browser e que servia o HTML antigo.
+    #
+    # "no-cache" nao proibe guardar - obriga a revalidar (ETag) antes de
+    # reusar; o custo e um 304 por carregamento.
     location / {
+        add_header Cache-Control "no-cache";
         try_files $uri $uri/ /index.html;
     }
 }

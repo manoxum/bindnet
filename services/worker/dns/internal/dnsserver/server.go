@@ -72,7 +72,13 @@ func NewHandler(cfg *core.Config, v core.View, responseIP string, blocks *blockl
 			// reanexou o search-domain (ex.: "xvideos.com.local") - devolve
 			// NXDOMAIN para nao cair no gateway/painel. Nas views host/
 			// container mantem a resolucao local (loopback), como antes.
-			if v == core.ViewHotspot {
+			isExplicit, err := zones.HasExplicitAddress(cfg, name)
+			if err != nil {
+				log.Printf("[dns-provider] erro ao verificar registro explicito %s: %v", name, err)
+				writeServerFailure(w, r)
+				return
+			}
+			if v == core.ViewHotspot && !isExplicit {
 				writeNXDomain(w, r)
 				return
 			}
@@ -136,6 +142,13 @@ func writeNXDomain(w dns.ResponseWriter, r *dns.Msg) {
 	msg := new(dns.Msg)
 	msg.SetReply(r)
 	msg.Rcode = dns.RcodeNameError
+	_ = w.WriteMsg(msg)
+}
+
+func writeServerFailure(w dns.ResponseWriter, r *dns.Msg) {
+	msg := new(dns.Msg)
+	msg.SetReply(r)
+	msg.Rcode = dns.RcodeServerFailure
 	_ = w.WriteMsg(msg)
 }
 

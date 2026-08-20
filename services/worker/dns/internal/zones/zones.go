@@ -92,6 +92,16 @@ func IsConcreteOwnedDomainZone(zone string) bool {
 // respondem com o IP do socket que recebeu a consulta; host usa loopback
 // persistente por hostname.
 func AnswerIPFor(cfg *core.Config, v core.View, kind Kind, name string, responseIP string) (net.IP, error) {
+	// Um A record configurado pelo operador vence a resposta derivada da
+	// view, inclusive para clientes do hotspot.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if ip, ok, err := store.ExplicitAddress(ctx, cfg.DB, strings.TrimSuffix(name, ".")); err != nil {
+		return nil, err
+	} else if ok {
+		return ip, nil
+	}
+
 	switch v {
 	case core.ViewContainer:
 		ip := net.ParseIP(responseIP)
@@ -108,6 +118,16 @@ func AnswerIPFor(cfg *core.Config, v core.View, kind Kind, name string, response
 	default:
 		return loopbackIPFor(cfg, name)
 	}
+}
+
+// HasExplicitAddress informa se o nome recebeu um A record manual. E usado
+// antes do filtro de wildcard da view hotspot: um nome cadastrado e uma
+// intencao explicita do operador, nao uma expansao do search-domain.
+func HasExplicitAddress(cfg *core.Config, name string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, ok, err := store.ExplicitAddress(ctx, cfg.DB, strings.TrimSuffix(name, "."))
+	return ok, err
 }
 
 func loopbackIPFor(cfg *core.Config, name string) (net.IP, error) {

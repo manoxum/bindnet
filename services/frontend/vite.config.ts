@@ -10,11 +10,11 @@ export default defineConfig(() => {
       host: "::",
       port: 9090,
       // Nomes servidos via nginx-ui (proxy reverso na frente do dev
-      // server, ver /etc/nginx/sites-available/{client,admin}.bindnet.local
+      // server, ver services/gateway/nginx-ui-site.conf
       // no container nginx-ui) - sem isso o Vite bloqueia com 403
       // "Blocked request" por causa da protecao contra DNS rebinding,
       // que rejeita qualquer Host header fora da allowlist.
-      allowedHosts: ["client.bindnet.local", "admin.bindnet.local"],
+      allowedHosts: ["bindnet.local.com", "admin.bindnet.local.com"],
       proxy: {
         "/api": {
           target: apiTarget,

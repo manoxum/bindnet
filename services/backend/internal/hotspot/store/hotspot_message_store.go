@@ -8,7 +8,7 @@ import (
 // MessageRow e um aviso que o operador envia aos dispositivos conectados
 // (ver services/backend/internal/hotspot/hotspot_messages.go). TargetMAC
 // vazio = broadcast (todos os conectados); preenchido = aviso a um unico
-// dispositivo. Urgent, alem de aparecer no /portal, forca o balao "Entrar
+// dispositivo. Urgent, alem de aparecer em bindnet.local.com, forca o balao "Entrar
 // na rede" via portal cativo (best-effort).
 type MessageRow struct {
 	ID        string

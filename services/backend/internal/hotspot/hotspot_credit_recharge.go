@@ -90,11 +90,7 @@ func applyCaptivePortalRedirect(ctx context.Context, db *sql.DB, worker *workera
 		}
 		return
 	}
-	portalURL, err := hotspotPortalURL(ctx, db)
-	if err != nil {
-		log.Printf("[backend] falha ao montar URL do portal cativo para %s: %v", mac, err)
-		return
-	}
+	portalURL := hotspotPortalURL()
 	if err := worker.Call(ctx, http.MethodPost, "/hotspot/captiveportal/enable",
 		map[string]string{"interface": iface, "mac": mac, "portalUrl": portalURL}, nil); err != nil {
 		log.Printf("[backend] falha ao ligar portal cativo de %s: %v", mac, err)

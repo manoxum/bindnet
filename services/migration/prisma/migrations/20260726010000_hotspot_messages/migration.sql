@@ -1,7 +1,7 @@
 -- Avisos/mensagens que o operador envia aos dispositivos conectados ao
 -- hotspot (ver services/backend/internal/hotspot/hotspot_messages.go e
 -- RULE.md). A entrega base e "pull": o dispositivo ve a mensagem na
--- pagina de autoatendimento publica /portal (identificado pelo MAC de
+-- pagina de autoatendimento publica bindnet.local.com (identificado pelo MAC de
 -- origem, igual aos vouchers). Mensagens marcadas "urgent" tambem sao
 -- "empurradas" reusando o portal cativo por-MAC ja existente do bloqueio
 -- de credito/cota (applyCaptivePortalRedirect) - nenhuma alteracao de DNS.
@@ -16,7 +16,7 @@ ALTER TABLE "hotspot_messages" ADD COLUMN IF NOT EXISTS "body" TEXT NOT NULL;
 -- target_mac NULL = broadcast (todos os conectados); preenchido = aviso
 -- direcionado a um unico dispositivo.
 ALTER TABLE "hotspot_messages" ADD COLUMN IF NOT EXISTS "target_mac" TEXT;
--- urgent: alem de aparecer no /portal, forca o balao "Entrar na rede" no
+-- urgent: alem de aparecer em bindnet.local.com, forca o balao "Entrar na rede" no
 -- dispositivo via portal cativo (best-effort, so porta 80/HTTP).
 ALTER TABLE "hotspot_messages" ADD COLUMN IF NOT EXISTS "urgent" BOOLEAN NOT NULL DEFAULT false;
 -- active=false = removida pelo admin (soft delete); mantida para trilha.

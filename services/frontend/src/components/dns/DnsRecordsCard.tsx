@@ -16,12 +16,13 @@ interface DnsRecordsCardProps {
 export function DnsRecordsCard({ records, mutations }: DnsRecordsCardProps) {
   const { addRecord, removeRecord, clearRecords } = mutations;
   const [newHostname, setNewHostname] = useState("");
+  const [newAddress, setNewAddress] = useState("");
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
 
   function submitAdd() {
     const hostname = newHostname.trim().toLowerCase();
     if (!hostname) return;
-    addRecord.mutate(hostname, { onSuccess: () => setNewHostname("") });
+    addRecord.mutate({ hostname, address: newAddress.trim() || undefined }, { onSuccess: () => { setNewHostname(""); setNewAddress(""); } });
   }
 
   return (
@@ -29,10 +30,10 @@ export function DnsRecordsCard({ records, mutations }: DnsRecordsCardProps) {
       <CardHeader>
         <div className="flex items-center justify-between gap-4">
           <div>
-            <CardTitle>DNS já resolvido ({records.length})</CardTitle>
+            <CardTitle>Zonas DNS locais ({records.length})</CardTitle>
             <CardDescription>
-              Hostnames que já ganharam um IP de loopback fixo (view host do split-horizon). Adicione manualmente
-              para reservar o IP antes da primeira consulta, ou remova entradas que não são mais usadas.
+              Cada zona cobre o próprio domínio e todos os seus subdomínios. Ex.: <span className="font-mono">empresa.local.</span>
+              resolve <span className="font-mono">app.empresa.local.</span> no mesmo IPv4. O ponto final é aceito e normalizado. Sem IP, o split-horizon reserva um loopback para a view do host.
             </CardDescription>
           </div>
           <Button
@@ -47,11 +48,17 @@ export function DnsRecordsCard({ records, mutations }: DnsRecordsCardProps) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex gap-2">
+        <div className="grid gap-2 sm:grid-cols-[1fr_12rem_auto]">
           <Input
-            placeholder="ex.: painel.local"
+            placeholder="Zona, ex.: empresa.local."
             value={newHostname}
             onChange={(e) => setNewHostname(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), submitAdd())}
+          />
+          <Input
+            placeholder="IPv4 opcional, ex.: 192.168.1.10"
+            value={newAddress}
+            onChange={(e) => setNewAddress(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), submitAdd())}
           />
           <Button type="button" onClick={submitAdd} disabled={!newHostname.trim() || addRecord.isPending}>
@@ -62,8 +69,9 @@ export function DnsRecordsCard({ records, mutations }: DnsRecordsCardProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Hostname</TableHead>
+              <TableHead>Zona</TableHead>
               <TableHead>Endereço</TableHead>
+              <TableHead className="hidden md:table-cell">Tipo</TableHead>
               <TableHead className="hidden sm:table-cell">Criado em</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
@@ -73,6 +81,7 @@ export function DnsRecordsCard({ records, mutations }: DnsRecordsCardProps) {
               <TableRow key={record.hostname}>
                 <TableCell className="font-mono text-xs">{record.hostname}</TableCell>
                 <TableCell className="font-mono text-xs">{record.address}</TableCell>
+                <TableCell className="hidden md:table-cell">{record.configuredAddress ? "IP configurado" : "Loopback automático"}</TableCell>
                 <TableCell className="hidden sm:table-cell">{new Date(record.createdAt).toLocaleString()}</TableCell>
                 <TableCell>
                   <div className="flex justify-end">
@@ -92,8 +101,8 @@ export function DnsRecordsCard({ records, mutations }: DnsRecordsCardProps) {
             ))}
             {records.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
-                  Nenhum hostname resolvido ainda.
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  Nenhuma zona configurada ainda.
                 </TableCell>
               </TableRow>
             )}

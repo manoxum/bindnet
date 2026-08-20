@@ -8,12 +8,39 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"bindnet/dns-provider/internal/config"
 )
+
+// ExplicitAddress devolve o A record da zona mais especifica que cobre o
+// nome. Assim, uma entrada "empresa.local" vale tanto para a propria zona
+// quanto para "app.empresa.local" e quaisquer outros subdominios. O DNS
+// local e IPv4-only; entradas antigas ou invalidas sao ignoradas.
+func ExplicitAddress(ctx context.Context, db *sql.DB, hostname string) (net.IP, bool, error) {
+	var address sql.NullString
+	err := db.QueryRowContext(ctx, `
+		SELECT address::text
+		FROM local_dns_records
+		WHERE hostname = $1 OR $1 LIKE '%.' || hostname
+		ORDER BY length(hostname) DESC
+		LIMIT 1
+	`, hostname).Scan(&address)
+	if err == sql.ErrNoRows || !address.Valid || strings.TrimSpace(address.String) == "" {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	ip := net.ParseIP(address.String)
+	if ip == nil || ip.To4() == nil {
+		return nil, false, nil
+	}
+	return ip.To4(), true, nil
+}
 
 // OpenPostgres segue o mesmo padrao de services/backend/db.go.
 func OpenPostgres() (*sql.DB, error) {

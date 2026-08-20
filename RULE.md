@@ -901,9 +901,11 @@ scripts tinham, só que dentro do container privilegiado em vez de
   `RemoteAddr`), cruzado contra `GET /hotspot/clients` (mesma função
   `liveHotspotClients` já usada pelo resto do hotspot). Falha em
   resolver o MAC devolve 409 — nunca aceita um MAC alternativo vindo do
-  cliente. A página (`/portal` no frontend, fora de `RequireAuth`) é
-  servida pelo mesmo SPA já publicado, sem porta/serviço novo.
-- **Redirecionamento automático (portal cativo)** não usa DNS: a
+  cliente. A página vive na raiz de `bindnet.local.com`, em uma
+  superfície React própria e sem `RequireAuth`; a área administrativa
+  vive exclusivamente em `admin.bindnet.local.com`. Os bundles são
+  separados por hostname, embora usem o mesmo serviço frontend.
+- **Redirecionamento automático (portal cativo)** não altera o DNS: a
   sondagem de conectividade que o próprio SO do dispositivo já dispara
   ao entrar numa rede Wi-Fi (HTTP simples, nunca HTTPS) é interceptada
   por uma regra `iptables -t nat -I PREROUTING ... REDIRECT` por MAC
@@ -911,7 +913,7 @@ scripts tinham, só que dentro do container privilegiado em vez de
   `filter/FORWARD` onde vive o DROP de `traffic_block.go` — o
   dispositivo continua associado ao Wi-Fi, só a porta 80 é desviada
   para um responder HTTP mínimo que sempre devolve um redirect para
-  `/portal`. Só é ativado quando o dispositivo é bloqueado **por falta
+  `http://bindnet.local.com/`. Só é ativado quando o dispositivo é bloqueado **por falta
   de crédito** (`blocked_by_credit`) — nunca pelo bloqueio manual do
   admin (blocklist modo "traffic"), que continua sem portal cativo de
   propósito. HTTPS não é interceptado (limitação universal de qualquer
@@ -929,7 +931,7 @@ scripts tinham, só que dentro do container privilegiado em vez de
   messages`, `DELETE /api/hotspot/messages/{id}`) exigem sessão; a
   remoção é *soft delete* (`active=false`), preservando a trilha.
 - **Entrega base (pull)**: o dispositivo vê o aviso na página pública
-  `/portal` (`GET /api/hotspot/portal/messages`), identificado pelo MAC
+  `bindnet.local.com` (`GET /api/hotspot/portal/messages`), identificado pelo MAC
   de origem exatamente como o resto do portal (`resolvePortalMAC`, nunca
   um MAC vindo do cliente). Não expirado (`expires_at`) e não lido conta;
   `POST /api/hotspot/portal/messages/{id}/read` marca lido.
@@ -939,7 +941,7 @@ scripts tinham, só que dentro do container privilegiado em vez de
   alteração de DNS nem interceptação L7**. Broadcast urgente liga o
   redirect para todos os MACs conectados no momento; direcionado, só para
   aquele MAC. É *best-effort* (só porta 80/HTTP, só loga em falha) — a
-  entrega garantida continua sendo o `/portal`.
+  entrega garantida continua sendo `bindnet.local.com`.
 - **Coordenação com o bloqueio de crédito/cota**: o redirect de portal
   cativo é "possuído" originalmente pelos reconciles de crédito/cota. O
   push de aviso é **aditivo**: ao desligar (aviso lido/removido/expirado)
@@ -947,7 +949,7 @@ scripts tinham, só que dentro do container privilegiado em vez de
   crédito (`blocked_by_credit`) ou cota (`hotspot_device_quota_periods.
   blocked`). Edge conhecido e aceito: um reconcile de crédito/cota logo
   em seguida pode desligar o push de um aviso urgente — mas o aviso
-  continua entregue pelo `/portal`.
+  continua entregue por `bindnet.local.com`.
 
 ## Isolamento de clientes (`services/backend/internal/hotspot/hotspot_isolation*.go`, `services/worker/controller/internal/shaping/isolation*.go`)
 
@@ -1424,6 +1426,74 @@ Regras:
   para a lista do `nginx-ui`. Esses volumes **não** são gerenciados pelo
   `docker-compose.yml` (são `external: true`) e precisam existir antes
   do primeiro `docker compose up` (ver README).
+
+## Serviço `gateway` (`services/gateway/`)
+
+Nginx puro (sem aplicação) que decide **qual serviço interno atende cada
+domínio** do Bindnet. Não é exposto ao host nem à rede do hotspot: a
+única porta pública continua sendo a do `nginx-ui`.
+
+- **Cadeia**: `nginx-ui` termina o TLS e repassa `bindnet.local.com` e
+  `admin.bindnet.local.com` para o `gateway` pela rede `wnet`, usando o
+  alias `${STAGE:-main}.gateway.bindnet.wnet` (mesmo padrão de
+  `${STAGE:-main}.nginx-ui.bindnet.wnet`). O `gateway` roteia por `Host`.
+- **Roteamento**:
+  - `admin.bindnet.local.com` → painel de administração (SPA na raiz);
+  - `bindnet.local.com` → portal cativo diretamente na raiz;
+  - `/api/` em ambos → direto ao `backend`;
+  - qualquer outro `Host` → `444` (fecha a conexão). Sem esse
+    `default_server`, um Host desconhecido cairia no primeiro `server`
+    e receberia o painel por engano.
+- **Separação no frontend**: o hostname escolhe a superfície antes do
+  roteamento React. `PortalApp` e `AdminApp` são imports dinâmicos
+  distintos; o domínio público não carrega as páginas administrativas.
+  O pathname `/portal` não seleciona mais a aplicação e só permanece no
+  gateway como redirect de compatibilidade para a raiz.
+- **`X-Forwarded-For` é obrigatório em todo salto**
+  (`services/gateway/bindnet-proxy.conf`, incluído em cada `location`):
+  o backend descobre o MAC do dispositivo do hotspot a partir do IP de
+  origem (`resolvePortalMAC`). `$proxy_add_x_forwarded_for` **acrescenta**
+  o IP do salto anterior à cadeia em vez de substituir — perder isso
+  faria o portal cativo deixar de reconhecer quem está conectado.
+- **Redes**: fica em `wnet` (por onde o `nginx-ui` o alcança por nome) e
+  em `proxy` (por onde alcança o host em `10.91.0.1`, já que `frontend`
+  e `backend` rodam com `network_mode: host` e não têm nome de serviço
+  Docker).
+- O site `@` do `nginx-ui` vive no volume `bindnet_nginx_config`, fora
+  deste repositório; há uma cópia versionada em
+  `services/gateway/nginx-ui-site.conf` como referência. A UI do
+  `nginx-ui` pode sobrescrevê-la.
+- **Cache do `index.html` é `no-cache`; os assets são `immutable`**
+  (`services/frontend/nginx.conf.template`). O `index.html` é o único
+  arquivo com nome fixo e é ele que aponta para o bundle atual —
+  servido sem `Cache-Control` (como estava), o browser aplica cache
+  heurístico a partir do `Last-Modified` e pode **nem revalidar**,
+  continuando a carregar uma versão antiga da aplicação inteira. Foi
+  exatamente isso que fez `bindnet.local.com` continuar a abrir a área
+  administrativa **depois** de o frontend já separar as superfícies por
+  hostname: o servidor estava correto, o browser é que servia o HTML
+  velho. Os arquivos em `/assets/` levam hash no nome, então podem ser
+  `immutable` sem risco — qualquer mudança gera um nome novo.
+
+## Página pública da CA no portal cativo (`bindnet.local.com/ca`)
+
+- Rota **sem sessão**, como a raiz do portal: quem acabou de entrar na rede
+  precisa instalar a CA local **antes** de navegar nos endereços
+  internos sem aviso de certificado, e nessa altura não tem conta
+  nenhuma no painel.
+- O download reusa `GET /api/mesh/ca`, a única rota de certificado que
+  já era pública por desenho — devolve só o certificado **público** da
+  CA (nunca a chave privada) e já vem com
+  `Content-Disposition: attachment`, por isso é um `<a href>` direto,
+  sem `fetch`/blob.
+- Traz instruções de instalação por sistema (Android, iOS, Windows,
+  Linux) em `PortalCaInstructions.tsx`. O passo de "Definições de
+  confiança em certificados" no iOS é destacado de propósito: sem ele o
+  certificado fica instalado mas não é confiado, e o sintoma é
+  idêntico ao de não ter instalado nada.
+- O link aparece na raiz de `bindnet.local.com` **fora** do bloco que depende da
+  identificação do dispositivo: instalar o certificado é útil mesmo
+  quando o portal ainda não conseguiu identificar o MAC.
 
 ## Banco de dados e armazenamento (`postgres`, `mongo`, `minio`, `redis`, `migration`)
 

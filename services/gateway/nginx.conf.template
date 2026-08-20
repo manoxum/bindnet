@@ -1,0 +1,89 @@
+# Gateway do Bindnet: decide qual servico interno atende cada dominio.
+#
+# Recebe trafego JA sem TLS do nginx-ui (que termina HTTPS e proxia por
+# nome na rede wnet - ver services/gateway/nginx-ui-site.conf), e a
+# partir do Host escolhe entre:
+#
+#   admin.bindnet.local.com  -> painel de administracao (SPA na raiz)
+#   bindnet.local.com        -> portal cativo (raiz do dominio)
+#
+# O frontend escolhe uma superficie isolada pelo Host e carrega um
+# bundle separado para cada dominio. O pathname nao decide mais entre
+# portal e administracao.
+
+# 10.91.0.1 e o gateway da bridge "proxy", por onde este container
+# alcanca o host. frontend e backend rodam com network_mode: host (ver
+# docker-compose.services.yml), entao nao ha nome de servico Docker
+# para eles - so a porta publicada no host.
+upstream bindnet_frontend {
+    server 10.91.0.1:${FRONTEND_PORT};
+}
+
+upstream bindnet_backend {
+    server 10.91.0.1:${BACKEND_PORT};
+}
+
+# proxy_headers: repassados igual em todos os blocos abaixo.
+#
+# X-Forwarded-For e o mais importante da lista: o backend identifica o
+# dispositivo do hotspot pelo IP de origem para descobrir o MAC dele
+# (resolvePortalMAC em services/backend/internal/hotspot/
+# hotspot_portal_resolve.go). Cada salto de proxy acrescenta o IP
+# anterior a essa cadeia; perder o cabecalho aqui faria o portal
+# cativo deixar de reconhecer quem esta conectado.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    # Dominio desconhecido nao e servido: sem isto, qualquer Host
+    # chegando ate aqui cairia no primeiro server block e receberia o
+    # painel de administracao por engano.
+    return 444;
+}
+
+# --- Painel de administracao -------------------------------------------
+server {
+    listen 80;
+    server_name admin.bindnet.local.com;
+
+    location /api/ {
+        proxy_pass http://bindnet_backend;
+        include /etc/nginx/bindnet-proxy.conf;
+    }
+
+    location / {
+        proxy_pass http://bindnet_frontend;
+        include /etc/nginx/bindnet-proxy.conf;
+    }
+}
+
+# --- Portal cativo -----------------------------------------------------
+server {
+    listen 80;
+    server_name bindnet.local.com;
+
+    location /api/ {
+        proxy_pass http://bindnet_backend;
+        include /etc/nginx/bindnet-proxy.conf;
+    }
+
+    # Compatibilidade com links antigos. A superficie publica vive na
+    # raiz do dominio; /portal deixou de ser uma rota da aplicacao.
+    location = /portal {
+        return 301 /;
+    }
+
+    location = /portal/ca {
+        return 301 /ca;
+    }
+
+    location / {
+        proxy_pass http://bindnet_frontend;
+        include /etc/nginx/bindnet-proxy.conf;
+    }
+}
