@@ -99,6 +99,9 @@ func AnswerIPFor(cfg *core.Config, v core.View, kind Kind, name string, response
 	if ip, ok, err := store.ExplicitAddress(ctx, cfg.DB, strings.TrimSuffix(name, ".")); err != nil {
 		return nil, err
 	} else if ok {
+		return configuredAddressFor(cfg, name, ip), nil
+	}
+	if ip := configuredAddressFor(cfg, name, nil); ip != nil {
 		return ip, nil
 	}
 
@@ -120,10 +123,46 @@ func AnswerIPFor(cfg *core.Config, v core.View, kind Kind, name string, response
 	}
 }
 
-// HasExplicitAddress informa se o nome recebeu um A record manual. E usado
-// antes do filtro de wildcard da view hotspot: um nome cadastrado e uma
-// intencao explicita do operador, nao uma expansao do search-domain.
-func HasExplicitAddress(cfg *core.Config, name string) (bool, error) {
+// configuredAddressFor aplica a ordem de precedencia dos IPs definidos
+// pelo operador: uma zona DNS explicita vence o IP estatico do TLD; este
+// por sua vez vence o split-horizon automatico. O sufixo mais especifico
+// e escolhido quando houver TLDs sobrepostos.
+func configuredAddressFor(cfg *core.Config, name string, explicit net.IP) net.IP {
+	if explicit != nil && explicit.To4() != nil {
+		return explicit.To4()
+	}
+	tld, ok := matchingTLD(cfg, name)
+	if !ok {
+		return nil
+	}
+	// A presenca do TLD, e nao somente a de um IP estatico, define a
+	// fronteira de prioridade. Assim, um TLD especifico no modo
+	// automatico impede que o IP estatico de um TLD pai seja aplicado.
+	if ip := cfg.TLDAddresses[tld]; ip != nil && ip.To4() != nil {
+		return ip.To4()
+	}
+	return nil
+}
+
+func matchingTLD(cfg *core.Config, name string) (string, bool) {
+	labels := dns.SplitDomainName(name)
+	for i := 0; i < len(labels); i++ {
+		tld := strings.Join(labels[i:], ".")
+		if cfg.TLDs[tld] {
+			return tld, true
+		}
+	}
+	return "", false
+}
+
+// HasConfiguredAddress informa se o nome recebeu um A record manual ou
+// pertence a um TLD com IP estatico. E usado antes do filtro de wildcard
+// da view hotspot: ambos sao intencoes explicitas do operador, nao uma
+// expansao acidental do search-domain.
+func HasConfiguredAddress(cfg *core.Config, name string) (bool, error) {
+	if configuredAddressFor(cfg, name, nil) != nil {
+		return true, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_, ok, err := store.ExplicitAddress(ctx, cfg.DB, strings.TrimSuffix(name, "."))
@@ -138,7 +177,8 @@ func loopbackIPFor(cfg *core.Config, name string) (net.IP, error) {
 		return offsetToLoopback(offset), nil
 	}
 
-	offset, err := store.GetOrAllocateOffset(ctx, cfg.DB, name)
+	originTLD, _ := matchingTLD(cfg, name)
+	offset, err := store.GetOrAllocateOffset(ctx, cfg.DB, name, originTLD)
 	if err != nil {
 		return nil, err
 	}

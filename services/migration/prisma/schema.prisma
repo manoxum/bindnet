@@ -76,9 +76,21 @@ model LocalDnsRecord {
   hostname       String   @unique
   loopbackOffset Int      @unique @map("loopback_offset")
   address        String?  @db.Inet
+  source         String   @default("dynamic")
+  originTld      String?  @map("origin_tld")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
 
+  @@index([source, originTld])
   @@map("local_dns_records")
+}
+
+// Configuracao por TLD local. address nulo preserva a resposta dinamica
+// split-horizon; um IPv4 fixa todos os dominios daquele sufixo.
+model LocalDnsTld {
+  tld     String  @id
+  address String? @db.Inet
+
+  @@map("local_dns_tlds")
 }
 
 // Tabela de rotas da malha de discover mode (roteamento por proximo

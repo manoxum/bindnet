@@ -102,6 +102,7 @@ func main() {
 	dns.RegisterDNSRouteRoutes(mux, admin, database, auditClient)
 	dns.RegisterDNSPeerRoutes(mux, admin, database, worker, auditClient)
 	dns.RegisterDNSRecordRoutes(mux, admin, database, auditClient)
+	dns.RegisterLocalTLDRoutes(mux, admin, database, auditClient)
 	cert.RegisterCertificateRoutes(mux, admin, database, ca, worker, auditClient)
 	cert.RegisterNginxUIRoutes(mux, admin)
 

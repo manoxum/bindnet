@@ -10,9 +10,9 @@ também é a porta de entrada para o banco de dados principal
 (PostgreSQL), a trilha de auditoria (MongoDB) e armazenamento de
 arquivos provisionado para uso futuro (MinIO).
 
-> Regras de negócio detalhadas por serviço: veja [RULE.md](RULE.md).
+> Regras de negócio detalhadas por serviço: veja [SoT/](SoT/README.md).
 > Diretrizes para ferramentas de IA trabalhando neste repo:
-> veja [CLAUDE.md](CLAUDE.md).
+> veja [AGENTS.md](AGENTS.md).
 
 ## Arquitetura
 
@@ -56,7 +56,7 @@ arquivos provisionado para uso futuro (MinIO).
 - **dns-provider** (`services/worker/dns/`) — servidor DNS Go próprio
   (não usa CoreDNS): resolve TLDs locais (`DNS_LOCAL_TLDS`) de forma
   diferente conforme quem pergunta (host/container/hotspot, ver
-  [RULE.md](RULE.md)), usa `server_name` declarados no nginx-ui como
+  [SoT/edge-and-ca-page.md](SoT/edge-and-ca-page.md)), usa `server_name` declarados no nginx-ui como
   anúncios locais, trata zonas concretas de discover (`DOMAINS`, ex.:
   `costa.bnet`) como domínios locais anunciados aos peers, e roteia
   domínios remotos conhecidos por próximo salto entre servidores
@@ -80,7 +80,7 @@ arquivos provisionado para uso futuro (MinIO).
 - **frontend** (`services/frontend/`) — interface web (React) do
   painel de gestão, consumida pelo navegador.
 - **postgres** — banco de dados principal do stack (dados de
-  certificados, ver [RULE.md](RULE.md)); imagem oficial, sem pasta
+  certificados, ver [SoT/certificates.md](SoT/certificates.md)); imagem oficial, sem pasta
   própria em `services/`.
 - **mongo** — trilha de auditoria do painel (login/logout, mudanças de
   config, emissão/revogação de certificado, start/stop de
@@ -231,7 +231,7 @@ Resumo das mais relevantes:
 | `TZ` | não | `Africa/Sao_Tome` | timezone dos containers |
 
 As regras de resolução automática de canal/banda do hotspot estão
-detalhadas em [RULE.md](RULE.md#serviço-hotspot-hotspotentrypointsh).
+detalhadas em [SoT/hotspot-radio.md](SoT/hotspot-radio.md).
 
 ## Confiando na CA local (HTTPS sem avisos)
 
@@ -259,7 +259,7 @@ automaticamente para o Postgres no primeiro boot do `backend`, desde
 que o volume `cert_proxy_data` ainda exista — nenhuma ação
 manual é necessária, e os dispositivos que já confiam na CA antiga
 continuam funcionando sem precisar reimportar nada (veja
-[RULE.md](RULE.md#gestão-de-certificados-servicesbackendcertificadosgo)).
+[SoT/certificates.md](SoT/certificates.md)).
 
 ## Operação
 
@@ -305,8 +305,8 @@ services/
     controller/             # Go - único serviço com docker.sock/NetworkManager/host network
     hotspot/                # Dockerfile + entrypoint.sh do serviço "hotspot" (create_ap)
     dns/                    # Go - servidor DNS split-horizon proprio do "dns-provider" (sem CoreDNS)
-RULE.md                   # regras de negócio de cada serviço
-CLAUDE.md                   # diretrizes para ferramentas de IA neste repo
+SoT/                        # fonte de verdade e regras de negócio do projeto
+AGENTS.md                   # diretrizes para ferramentas de IA neste repo
 ```
 
 `postgres`, `mongo` e `minio` são imagens oficiais configuradas só no

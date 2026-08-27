@@ -54,6 +54,12 @@ func main() {
 		log.Fatalf("[dns-provider] %v", err)
 	}
 	log.Printf("[dns-provider] TLDs locais resolvidos: %v", config.ZoneNames(tlds))
+	tldAddressCtx, tldAddressCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	tldAddresses, err := store.LoadLocalTLDAddresses(tldAddressCtx, db)
+	tldAddressCancel()
+	if err != nil {
+		log.Fatalf("[dns-provider] erro ao ler IPs estaticos dos TLDs: %v", err)
+	}
 
 	domainZones, err := config.ParseOptionalDomains(store.Setting(dnsCfg, store.KeyDomains, ""), "DOMAINS")
 	if err != nil {
@@ -138,16 +144,17 @@ func main() {
 	routesCancel()
 
 	cfg := &core.Config{
-		TLDs:        tlds,
-		DomainZones: domainZones,
-		NginxHosts:  nginxNames.Hosts,
-		NginxZones:  nginxNames.Zones,
-		DB:          db,
-		Cache:       redisCache,
-		Routes:      routes,
-		NodeName:    nodeName,
-		Fingerprint: fingerprint,
-		RemoteMode:  remoteMode,
+		TLDs:         tlds,
+		TLDAddresses: tldAddresses,
+		DomainZones:  domainZones,
+		NginxHosts:   nginxNames.Hosts,
+		NginxZones:   nginxNames.Zones,
+		DB:           db,
+		Cache:        redisCache,
+		Routes:       routes,
+		NodeName:     nodeName,
+		Fingerprint:  fingerprint,
+		RemoteMode:   remoteMode,
 	}
 	log.Printf("[dns-provider] no de descoberta '%s' fingerprint=%s, rotas remotas: %s", nodeName, fingerprint, remoteMode)
 

@@ -19,6 +19,8 @@ type localDnsRecord struct {
 	Hostname          string  `json:"hostname"`
 	Address           string  `json:"address"`
 	ConfiguredAddress *string `json:"configuredAddress"`
+	Source            string  `json:"source"`
+	OriginTLD         *string `json:"originTld"`
 	LoopbackOffset    int64   `json:"loopbackOffset"`
 	CreatedAt         string  `json:"createdAt"`
 }
@@ -34,7 +36,9 @@ func offsetToLoopback(offset int64) string {
 func RegisterDNSRecordRoutes(mux *http.ServeMux, admin *auth.Administrator, db *sql.DB, audit *audit.Client) {
 	mux.HandleFunc("GET /api/dns/records", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.QueryContext(r.Context(), `
-			SELECT hostname, loopback_offset, address::text, created_at FROM local_dns_records ORDER BY hostname
+			SELECT hostname, loopback_offset, address::text, source, origin_tld, created_at
+			FROM local_dns_records
+			ORDER BY source, origin_tld NULLS FIRST, hostname
 		`)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -45,7 +49,7 @@ func RegisterDNSRecordRoutes(mux *http.ServeMux, admin *auth.Administrator, db *
 		records := []localDnsRecord{}
 		for rows.Next() {
 			var record localDnsRecord
-			if err := rows.Scan(&record.Hostname, &record.LoopbackOffset, &record.ConfiguredAddress, &record.CreatedAt); err != nil {
+			if err := rows.Scan(&record.Hostname, &record.LoopbackOffset, &record.ConfiguredAddress, &record.Source, &record.OriginTLD, &record.CreatedAt); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -86,9 +90,10 @@ func RegisterDNSRecordRoutes(mux *http.ServeMux, admin *auth.Administrator, db *
 		}
 
 		if _, err := db.ExecContext(r.Context(), `
-			INSERT INTO local_dns_records (hostname, loopback_offset, address)
-			VALUES ($1, nextval('local_dns_records_offset_seq'), $2)
-			ON CONFLICT (hostname) DO UPDATE SET address = EXCLUDED.address
+			INSERT INTO local_dns_records (hostname, loopback_offset, address, source, origin_tld)
+			VALUES ($1, nextval('local_dns_records_offset_seq'), $2, 'manual', NULL)
+			ON CONFLICT (hostname) DO UPDATE
+			SET address = EXCLUDED.address, source = 'manual', origin_tld = NULL
 		`, hostname, address); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -97,8 +102,8 @@ func RegisterDNSRecordRoutes(mux *http.ServeMux, admin *auth.Administrator, db *
 		var record localDnsRecord
 		record.Hostname = hostname
 		err := db.QueryRowContext(r.Context(), `
-			SELECT loopback_offset, address::text, created_at FROM local_dns_records WHERE hostname = $1
-		`, hostname).Scan(&record.LoopbackOffset, &record.ConfiguredAddress, &record.CreatedAt)
+			SELECT loopback_offset, address::text, source, origin_tld, created_at FROM local_dns_records WHERE hostname = $1
+		`, hostname).Scan(&record.LoopbackOffset, &record.ConfiguredAddress, &record.Source, &record.OriginTLD, &record.CreatedAt)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -122,6 +127,16 @@ func RegisterDNSRecordRoutes(mux *http.ServeMux, admin *auth.Administrator, db *
 		}
 		username, _ := auth.SessionUser(r, admin)
 		audit.Record(r.Context(), "dns_records_cleared", username, nil)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	mux.HandleFunc("DELETE /api/dns/records/dynamic", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		if _, err := db.ExecContext(r.Context(), `DELETE FROM local_dns_records WHERE source = 'dynamic'`); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		username, _ := auth.SessionUser(r, admin)
+		audit.Record(r.Context(), "dns_dynamic_records_cleared", username, nil)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 

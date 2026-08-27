@@ -13,3 +13,4 @@ services/worker/controller/worker
 services/worker/dns/dns-provider
 services/migration/dist/
 services/migration/prisma/generated/
+/.promote/

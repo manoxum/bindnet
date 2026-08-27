@@ -5,8 +5,16 @@ export interface DnsRecord {
   hostname: string;
   address: string;
   configuredAddress: string | null;
+  source: "manual" | "dynamic";
+  originTld: string | null;
   loopbackOffset: number;
   createdAt: string;
+}
+
+export interface LocalTldConfig {
+  tld: string;
+  mode: "automatic" | "static";
+  address?: string;
 }
 
 export function useDnsQueries() {
@@ -20,5 +28,10 @@ export function useDnsQueries() {
     queryFn: () => api.get<DnsRecord[]>("/dns/records"),
   });
 
-  return { config, records };
+  const localTlds = useQuery<LocalTldConfig[]>({
+    queryKey: ["dns", "local-tlds"],
+    queryFn: () => api.get<LocalTldConfig[]>("/dns/local-tlds"),
+  });
+
+  return { config, records, localTlds };
 }

@@ -1,10 +1,85 @@
 package zones
 
 import (
+	"net"
 	"testing"
 
 	"bindnet/dns-provider/internal/core"
 )
+
+func TestConfiguredAddressPrefersExplicitZoneOverStaticTLD(t *testing.T) {
+	cfg := &core.Config{TLDAddresses: map[string]net.IP{
+		"local": net.ParseIP("192.168.50.10"),
+	}}
+
+	ip := configuredAddressFor(cfg, "app.empresa.local", net.ParseIP("10.0.0.25"))
+	if got, want := ip.String(), "10.0.0.25"; got != want {
+		t.Fatalf("configuredAddressFor() = %s, want explicit zone address %s", got, want)
+	}
+}
+
+func TestConfiguredAddressUsesStaticTLDForAllSubdomains(t *testing.T) {
+	cfg := &core.Config{
+		TLDs: map[string]bool{"local": true, "empresa.test": true},
+		TLDAddresses: map[string]net.IP{
+			"local":        net.ParseIP("192.168.50.10"),
+			"empresa.test": net.ParseIP("10.20.30.40"),
+		},
+	}
+
+	for _, name := range []string{"empresa.test", "api.empresa.test", "deep.api.empresa.test"} {
+		ip := configuredAddressFor(cfg, name, nil)
+		if got, want := ip.String(), "10.20.30.40"; got != want {
+			t.Fatalf("configuredAddressFor(%q) = %s, want static TLD address %s", name, got, want)
+		}
+	}
+}
+
+func TestMoreSpecificAutomaticTLDPreventsParentStaticAddress(t *testing.T) {
+	cfg := &core.Config{
+		TLDs: map[string]bool{
+			"local.com":           true,
+			"test.sgdp.local.com": true,
+		},
+		TLDAddresses: map[string]net.IP{
+			"local.com": net.ParseIP("127.0.0.141"),
+		},
+	}
+
+	if ip := configuredAddressFor(cfg, "a.test.sgdp.local.com", nil); ip != nil {
+		t.Fatalf("configuredAddressFor() = %s, want no static address because test.sgdp.local.com is more specific", ip)
+	}
+}
+
+func TestMoreSpecificStaticTLDWinsOverParent(t *testing.T) {
+	cfg := &core.Config{
+		TLDs: map[string]bool{
+			"local.com":           true,
+			"test.sgdp.local.com": true,
+		},
+		TLDAddresses: map[string]net.IP{
+			"local.com":           net.ParseIP("127.0.0.141"),
+			"test.sgdp.local.com": net.ParseIP("10.234.1.69"),
+		},
+	}
+
+	ip := configuredAddressFor(cfg, "a.test.sgdp.local.com", nil)
+	if got, want := ip.String(), "10.234.1.69"; got != want {
+		t.Fatalf("configuredAddressFor() = %s, want the closest TLD address %s", got, want)
+	}
+}
+
+func TestStaticTLDIsConfiguredForHotspotWildcard(t *testing.T) {
+	cfg := &core.Config{
+		TLDs:         map[string]bool{"local": true},
+		TLDAddresses: map[string]net.IP{"local": net.ParseIP("192.168.50.10")},
+	}
+
+	configured, err := HasConfiguredAddress(cfg, "app.local.")
+	if err != nil || !configured {
+		t.Fatalf("HasConfiguredAddress(app.local.) = (%t, %v), want (true, nil)", configured, err)
+	}
+}
 
 func TestZoneForExactDomainZoneIsLocal(t *testing.T) {
 	cfg := &core.Config{

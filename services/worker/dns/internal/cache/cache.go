@@ -38,6 +38,11 @@ func Hydrate(ctx context.Context, db *sql.DB, cache *redis.Client) error {
 	if err != nil {
 		return err
 	}
+	// A configuracao de TLD pode ter invalidado registros dinamicos desde
+	// a ultima execucao. Reconstrui o hash para nao manter offsets antigos.
+	if err := cache.Del(ctx, redisHashKey).Err(); err != nil {
+		return err
+	}
 	if len(records) == 0 {
 		return nil
 	}

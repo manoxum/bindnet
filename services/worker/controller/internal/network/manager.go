@@ -105,6 +105,17 @@ func ManageWifiInterface(iface string) error {
 	}
 	output, err := setDeviceManaged(iface, true)
 	if err != nil {
+		// Remover o drop-in ja devolve a interface ao estado gerenciado na
+		// proxima vez que o NetworkManager a enxergar. Durante a parada do
+		// hotspot a interface pode ainda estar sendo recriada pelo driver ou
+		// o nome salvo no painel pode nao existir mais; nesse caso o nmcli
+		// responde "Device ... not found". Nao transformar essa condicao
+		// transitória/idempotente em 500: a configuracao persistente ja foi
+		// corrigida e a proxima aparicao sera gerenciada normalmente.
+		if isDeviceNotFoundOutput(output) {
+			log.Printf("[worker] %s ainda nao aparece no NetworkManager; drop-in removido, sera gerenciada quando reaparecer (%s)", iface, strings.TrimSpace(string(output)))
+			return nil
+		}
 		log.Printf("[worker] erro ao rodar 'nmcli device set %s managed yes': %v (%s)", iface, err, output)
 		if reloadErr != nil {
 			return fmt.Errorf("%s\n%s", strings.TrimSpace(string(reloadOutput)), strings.TrimSpace(string(output)))
@@ -112,6 +123,12 @@ func ManageWifiInterface(iface string) error {
 		return fmt.Errorf("%s", strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func isDeviceNotFoundOutput(output []byte) bool {
+	message := strings.ToLower(string(output))
+	return strings.Contains(message, "device") && strings.Contains(message, "not found") ||
+		strings.Contains(message, "dispositivo") && (strings.Contains(message, "não encontrado") || strings.Contains(message, "nao encontrado"))
 }
 
 func reloadNetworkManagerConfig() ([]byte, error) {

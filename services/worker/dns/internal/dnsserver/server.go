@@ -70,15 +70,15 @@ func NewHandler(cfg *core.Config, v core.View, responseIP string, blocks *blockl
 			// Casou so pelo curinga de TLD local. Para clientes do hotspot
 			// isso e quase sempre um dominio publico bloqueado que o SO
 			// reanexou o search-domain (ex.: "xvideos.com.local") - devolve
-			// NXDOMAIN para nao cair no gateway/painel. Nas views host/
-			// container mantem a resolucao local (loopback), como antes.
-			isExplicit, err := zones.HasExplicitAddress(cfg, name)
+			// NXDOMAIN para nao cair no gateway/painel. Uma zona com IP
+			// explicito ou um TLD estatico e intencao do operador e passa.
+			isConfigured, err := zones.HasConfiguredAddress(cfg, name)
 			if err != nil {
 				log.Printf("[dns-provider] erro ao verificar registro explicito %s: %v", name, err)
 				writeServerFailure(w, r)
 				return
 			}
-			if v == core.ViewHotspot && !isExplicit {
+			if v == core.ViewHotspot && !isConfigured {
 				writeNXDomain(w, r)
 				return
 			}

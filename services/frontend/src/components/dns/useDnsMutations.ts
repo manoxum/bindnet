@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { DnsRecord } from "@/components/dns/useDnsQueries";
+import type { DnsRecord, LocalTldConfig } from "@/components/dns/useDnsQueries";
 
 interface TestResponse {
   addresses?: string[];
@@ -22,6 +22,19 @@ export function useDnsMutations() {
     onSuccess: () => {
       toast.success("TLDs salvos e DNS reiniciado com os novos valores.");
       queryClient.invalidateQueries({ queryKey: ["dns", "config"] });
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao salvar/aplicar"),
+  });
+
+  const saveLocalTlds = useMutation({
+    mutationFn: async (tlds: LocalTldConfig[]) => {
+      await api.put("/dns/local-tlds", tlds);
+      await api.post("/dns/apply");
+    },
+    onSuccess: () => {
+      toast.success("TLDs salvos e DNS reiniciado com os novos valores.");
+      queryClient.invalidateQueries({ queryKey: ["dns", "config"] });
+      queryClient.invalidateQueries({ queryKey: ["dns", "local-tlds"] });
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao salvar/aplicar"),
   });
@@ -50,15 +63,18 @@ export function useDnsMutations() {
   });
 
   const clearRecords = useMutation({
-    mutationFn: () => api.del("/dns/records"),
+    mutationFn: async () => {
+      await api.del("/dns/records/dynamic");
+      await api.post("/dns/apply");
+    },
     onSuccess: () => {
-      toast.success("Todos os registros foram removidos.");
+      toast.success("Registros dinâmicos removidos.");
       queryClient.invalidateQueries({ queryKey: ["dns", "records"] });
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao limpar registros"),
   });
 
-  return { saveTlds, test, addRecord, removeRecord, clearRecords };
+  return { saveTlds, saveLocalTlds, test, addRecord, removeRecord, clearRecords };
 }
 
 export type { TestResponse };

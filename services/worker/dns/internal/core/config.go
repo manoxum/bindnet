@@ -6,6 +6,7 @@ package core
 
 import (
 	"database/sql"
+	"net"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -30,14 +31,17 @@ const (
 // goroutines de descoberta. Nenhum campo muda depois do boot exceto o
 // conteudo de Routes, trocado atomicamente pela goroutine de poll.
 type Config struct {
-	TLDs        map[string]bool
-	DomainZones map[string]bool
-	NginxHosts  map[string]bool
-	NginxZones  map[string]bool
-	DB          *sql.DB
-	Cache       *redis.Client
-	Routes      *Table
-	NodeName    string
-	Fingerprint string
-	RemoteMode  string
+	TLDs map[string]bool
+	// TLDAddresses fixa a resposta A para todos os nomes sob um TLD local.
+	// A ausencia da chave preserva o split-horizon automatico.
+	TLDAddresses map[string]net.IP
+	DomainZones  map[string]bool
+	NginxHosts   map[string]bool
+	NginxZones   map[string]bool
+	DB           *sql.DB
+	Cache        *redis.Client
+	Routes       *Table
+	NodeName     string
+	Fingerprint  string
+	RemoteMode   string
 }

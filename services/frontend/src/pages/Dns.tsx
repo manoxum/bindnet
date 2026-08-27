@@ -13,7 +13,7 @@ import { useUrlTab } from "@/hooks/useUrlTab";
 export function DnsPage() {
   usePageHeader({ title: "DNS local (split-horizon)", description: "TLDs locais, malha de descoberta e testes de resolução." });
 
-  const { config, records } = useDnsQueries();
+  const { config, records, localTlds } = useDnsQueries();
   const mutations = useDnsMutations();
   const [tab, setTab] = useUrlTab("records");
 
@@ -38,12 +38,12 @@ export function DnsPage() {
       </TabsList>
 
       <TabsContent value="records" className="mt-0 space-y-4">
-        <DnsRecordsCard records={records.data ?? []} mutations={mutations} />
+        <DnsRecordsCard records={records.data ?? []} localTlds={localTlds.data ?? []} mutations={mutations} />
         <DnsTestResolutionCard mutations={mutations} />
       </TabsContent>
 
       <TabsContent value="config" className="mt-0 space-y-4">
-        <DnsLocalTldsCard config={config.data} mutations={mutations} />
+        <DnsLocalTldsCard config={config.data} tldConfigs={localTlds.data} mutations={mutations} />
         <DiscoverMeshConfigCard />
       </TabsContent>
 
