@@ -1,0 +1,7 @@
+Promotion Report - Thu 27 Aug 2026 03:48:00 PM GMT
+-------------------------------------------
+[FAILURE] backend: brainsoftstp/private:bindnet-backend-main-v1.0.0 -> brainsoftstp/private:bindnet-backend-dev-v1.0.0
+[FAILURE] dns-provider: brainsoftstp/private:bindnet-dns-provider-main-v1.0.0 -> brainsoftstp/private:bindnet-dns-provider-dev-v1.0.0
+[FAILURE] frontend: brainsoftstp/private:bindnet-frontend-main-v1.0.0 -> brainsoftstp/private:bindnet-frontend-dev-v1.0.0
+[FAILURE] gateway: brainsoftstp/private:bindnet-gateway-main-v1.0.0 -> brainsoftstp/private:bindnet-gateway-dev-v1.0.0
+[FAILURE] hotspot: brainsoftstp/private:bindnet-hotspot-main-v1.0.0 -> brainsoftstp/private:bindnet-hotspot-dev-v1.0.0

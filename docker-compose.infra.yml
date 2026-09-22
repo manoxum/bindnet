@@ -64,7 +64,7 @@ services:
           - "${STAGE:-main}.mongo.bindnet.dbnet"
 
   minio:
-    image: minio/minio
+    image: quay.io/minio/aistor/minio:latest
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:

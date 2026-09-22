@@ -15,6 +15,11 @@ Regras:
   física; esses serviços só sobem quando o usuário aplica/inicia o
   hotspot pelo painel. `migration` (job one-shot) propositalmente não
   está nessa lista.
+- No bootstrap, o `worker` grava de forma idempotente um drop-in que
+  marca `docker0`, bridges `br-*` e interfaces `veth*` como não
+  gerenciadas pelo NetworkManager. Isso preserva todas as redes Docker
+  e evita que ciclos de containers pareçam alterações de rede do host;
+  a regra temporária do hotspot continua separada.
 - O painel **não edita mais o `.env`**. Toda configuração operacional
   vive no Postgres, em tabelas chave/valor: `hotspot_config`
   (`WIFI_*`, `HOTSPOT_GATEWAY`, `HOTSPOT_CIDR`, …), `dns_config`
@@ -58,4 +63,3 @@ Regras:
   dependências, porque não há alternativa razoável de biblioteca
   padrão para os protocolos de rede desses bancos — diferente do caso
   HMAC-SHA256, que a stdlib já resolve bem.
-

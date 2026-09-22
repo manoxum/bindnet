@@ -26,6 +26,10 @@ const socketPath = "/run/bindnet-admin/worker.sock"
 func main() {
 	log.SetFlags(log.LstdFlags)
 	log.Println("[worker] iniciando agente privilegiado")
+	if err := network.EnsureDockerVirtualDevicesUnmanaged(); err != nil {
+		log.Fatalf("[worker] erro ao proteger interfaces virtuais do Docker no NetworkManager: %v", err)
+	}
+	log.Println("[worker] interfaces virtuais do Docker protegidas do NetworkManager")
 
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
 		log.Fatalf("[worker] erro ao preparar diretorio do socket: %v", err)
