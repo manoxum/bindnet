@@ -5,6 +5,7 @@ import { SetupHotspotStep } from "@/components/setup/SetupHotspotStep";
 import { SetupDnsStep } from "@/components/setup/SetupDnsStep";
 import { SetupStatusStep } from "@/components/setup/SetupStatusStep";
 import type { ConfigForm } from "@/components/hotspot/hotspot-schema";
+import { BrandMark } from "@/components/BrandMark";
 
 const steps = ["Hotspot", "DNS", "Status"];
 
@@ -18,6 +19,7 @@ export function SetupPage() {
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <div className="w-full max-w-2xl space-y-6">
         <div className="space-y-1 text-center">
+          <BrandMark className="mx-auto mb-3 h-12 w-12 shadow-sm" />
           <h1 className="text-2xl font-semibold">Configuração inicial do bindnet</h1>
           <p className="text-sm text-muted-foreground">
             Configure o hotspot e o DNS - tudo é salvo e aplicado só no último passo.

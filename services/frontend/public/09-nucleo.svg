@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" role="img" aria-label="Bindnet">
+  <rect width="240" height="240" rx="52" fill="#F4F8F5"/>
+  <circle cx="120" cy="120" r="40" fill="#0B2B24"/>
+  <path d="M120 28v52M120 160v52M28 120h52M160 120h52" stroke="#153F35" stroke-width="28" stroke-linecap="round"/>
+  <circle cx="120" cy="120" r="18" fill="#B8F24A"/>
+  <circle cx="120" cy="28" r="14" fill="#B8F24A"/>
+  <circle cx="212" cy="120" r="14" fill="#B8F24A"/>
+</svg>

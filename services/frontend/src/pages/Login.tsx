@@ -11,7 +11,6 @@ import {
   EyeOff,
   KeyRound,
   LockKeyhole,
-  Network,
   RadioTower,
   ServerCog,
   ShieldCheck,
@@ -22,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLogin, useSession } from "@/hooks/useAuth";
 import { ApiError } from "@/lib/api";
+import { BrandMark } from "@/components/BrandMark";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Informe o usuário"),
@@ -67,9 +67,7 @@ export function LoginPage() {
         <section className="login-reveal flex flex-col justify-between px-6 py-7 sm:px-10 lg:px-16 lg:py-12 xl:px-24">
           <header className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-200/20 bg-emerald-200/10 text-emerald-200">
-                <Network className="h-5 w-5" />
-              </span>
+              <BrandMark className="h-10 w-10 shadow-[0_8px_24px_rgba(0,0,0,0.18)]" />
               <div>
                 <p className="text-lg font-semibold tracking-[-0.03em]">bindnet</p>
                 <p className="text-[9px] font-semibold uppercase tracking-[0.24em] text-slate-500">network control</p>

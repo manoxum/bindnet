@@ -1,8 +1,8 @@
 import { NavLink } from "react-router-dom";
-import { Network } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { navItems } from "@/components/layout/nav-items";
+import { BrandMark } from "@/components/BrandMark";
 
 interface MobileNavProps {
   open: boolean;
@@ -16,9 +16,7 @@ export function MobileNav({ open, onOpenChange }: MobileNavProps) {
       <SheetContent side="left" className="flex w-64 flex-col p-4">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <Network className="h-4 w-4" />
-            </div>
+            <BrandMark className="h-7 w-7" />
             bindnet
           </SheetTitle>
         </SheetHeader>
