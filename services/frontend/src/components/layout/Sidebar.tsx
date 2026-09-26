@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Network } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { navItems } from "@/components/layout/nav-items";
+import { BrandMark } from "@/components/BrandMark";
 
 const STORAGE_KEY = "bindnet-sidebar-collapsed";
 
@@ -30,9 +31,7 @@ export function Sidebar() {
       )}
     >
       <div className={cn("mb-6 flex items-center gap-2 px-1", collapsed && "justify-center")}>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <Network className="h-4 w-4" />
-        </div>
+        <BrandMark className="h-8 w-8" />
         {!collapsed && <span className="truncate text-lg font-semibold tracking-tight">bindnet</span>}
       </div>
 

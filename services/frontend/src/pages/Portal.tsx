@@ -4,7 +4,6 @@ import {
   ArrowRight,
   CheckCircle2,
   Gauge,
-  Network,
   QrCode,
   RefreshCw,
   ShieldCheck,
@@ -25,6 +24,7 @@ import { usePortalMe } from "@/components/portal/usePortalQueries";
 import { useRedeemVoucher } from "@/components/portal/usePortalMutations";
 import { PortalVoucherQrScanner } from "@/components/portal/PortalVoucherQrScanner";
 import { ApiError } from "@/lib/api";
+import { BrandMark } from "@/components/BrandMark";
 
 // Superfície pública exclusiva de bindnet.local.com. O dispositivo é
 // identificado pelo IP de origem no backend, nunca por login ou por um
@@ -57,9 +57,7 @@ export function PortalPage() {
       <main className="relative mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
         <header className="portal-reveal flex items-center justify-between border-b border-white/10 pb-5">
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#a8ee63]/30 bg-[#a8ee63]/10 shadow-[0_0_28px_rgba(168,238,99,0.14)]">
-              <Network className="h-5 w-5 text-[#b8f24a]" />
-            </span>
+            <BrandMark className="h-10 w-10 shadow-[0_0_28px_rgba(168,238,99,0.14)]" />
             <div>
               <p className="portal-wordmark text-lg font-semibold tracking-[-0.03em]">bindnet</p>
               <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#8eaaa0]">portal da rede</p>
