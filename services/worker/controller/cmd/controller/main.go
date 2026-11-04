@@ -19,6 +19,7 @@ import (
 	"bindnet/worker/internal/peer"
 	"bindnet/worker/internal/shaping"
 	"bindnet/worker/internal/trust"
+	"bindnet/worker/internal/tunnel"
 )
 
 const socketPath = "/run/bindnet-admin/worker.sock"
@@ -47,6 +48,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	compose.RegisterContainerRoutes(mux)
+	tunnel.RegisterRoutes(mux)
 	hotspot.RegisterServiceRoutes(mux)
 	hotspot.RegisterClientRoutes(mux)
 	hotspot.RegisterFingerprintRoutes(mux)

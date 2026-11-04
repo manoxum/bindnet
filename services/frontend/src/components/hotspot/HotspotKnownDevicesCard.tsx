@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Ban, ScanSearch, Undo2, WifiOff } from "lucide-react";
+import { ScanSearch } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DeviceIdentifyModal } from "@/components/hotspot/DeviceIdentifyModal";
+import { HotspotDeviceBlockActions } from "@/components/hotspot/HotspotDeviceBlockActions";
 import type { HotspotKnownDevice } from "@/components/hotspot/useHotspotQueries";
 import type { HotspotBlockMode } from "@/components/hotspot/useHotspotMutations";
 
@@ -89,41 +90,14 @@ export function HotspotKnownDevicesCard({
                           <span className="hidden sm:inline">Identificar</span>
                         </Button>
                       )}
-                      {blocked ? (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          aria-label="Desbloquear"
-                          disabled={unblockPendingMac === device.mac}
-                          onClick={() => onUnblock(device.mac)}
-                        >
-                          <Undo2 className="h-4 w-4" />
-                          <span className="hidden sm:inline">Desbloquear</span>
-                        </Button>
-                      ) : (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            aria-label="Cortar tráfego"
-                            disabled={blockPendingMac === device.mac}
-                            onClick={() => onBlock(device.mac, "traffic")}
-                          >
-                            <WifiOff className="h-4 w-4" />
-                            <span className="hidden sm:inline">Cortar tráfego</span>
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            aria-label="Bloquear"
-                            disabled={blockPendingMac === device.mac}
-                            onClick={() => onBlock(device.mac, "deauth")}
-                          >
-                            <Ban className="h-4 w-4" />
-                            <span className="hidden sm:inline">Bloquear</span>
-                          </Button>
-                        </>
-                      )}
+                      <HotspotDeviceBlockActions
+                        mac={device.mac}
+                        blocked={blocked}
+                        blockPendingMac={blockPendingMac}
+                        unblockPendingMac={unblockPendingMac}
+                        onBlock={onBlock}
+                        onUnblock={onUnblock}
+                      />
                     </div>
                   </TableCell>
                 </TableRow>

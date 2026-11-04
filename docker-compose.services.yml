@@ -74,6 +74,8 @@ services:
       - ${BINDNET_ENV_FILE:-.env.main}
     environment:
       BINDNET_ENV_PATH: /workspace/${BINDNET_ENV_FILE:-.env.main}
+      # Preserva a selecao tambem no Compose chamado internamente pelo worker.
+      BINDNET_ENV_FILE: ${BINDNET_ENV_FILE:-.env.main}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /run/dbus:/run/dbus
@@ -98,6 +100,7 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       BACKEND_PORT: ${BACKEND_PORT:-8090}
+      PORTAL_HOST_REDIRECT_ENABLED: ${PORTAL_HOST_REDIRECT_ENABLED:-true}
       POSTGRES_USER: ${POSTGRES_USER:-bindnet}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-bindnet}

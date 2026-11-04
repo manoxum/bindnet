@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -11,25 +12,24 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"bindnet/backend/internal/audit"
 )
 
 const (
 	sessionCookieName = "bindnet_session"
-	sessionDuration   = 12 * time.Hour
+	// Prazo compativel com o limite de 400 dias do Chrome; cada visita renova o prazo.
+	sessionCookieLifetime = 400 * 24 * time.Hour
 )
 
 type session struct {
 	Username string `json:"username"`
-	Exp      int64  `json:"exp"`
+	Exp      int64  `json:"exp,omitempty"` // somente tokens legados tem expiracao
 }
 
 // issueToken cria um token assinado (payload base64url + assinatura
 // HMAC-SHA256) - um substituto minimalista de JWT sem depender de
 // bibliotecas externas, guardado num cookie httpOnly.
 func issueToken(username string, secret []byte) (string, error) {
-	s := session{Username: username, Exp: time.Now().Add(sessionDuration).Unix()}
+	s := session{Username: username}
 	payload, err := json.Marshal(s)
 	if err != nil {
 		return "", err
@@ -39,14 +39,14 @@ func issueToken(username string, secret []byte) (string, error) {
 }
 
 func validateToken(token string, secret []byte) (string, bool) {
-	partes := strings.SplitN(token, ".", 2)
-	if len(partes) != 2 {
+	parts := strings.SplitN(token, ".", 2)
+	if len(parts) != 2 {
 		return "", false
 	}
-	if !hmac.Equal([]byte(sign(partes[0], secret)), []byte(partes[1])) {
+	if !hmac.Equal([]byte(sign(parts[0], secret)), []byte(parts[1])) {
 		return "", false
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(partes[0])
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
 		return "", false
 	}
@@ -54,7 +54,7 @@ func validateToken(token string, secret []byte) (string, bool) {
 	if err := json.Unmarshal(payload, &s); err != nil {
 		return "", false
 	}
-	if time.Now().Unix() > s.Exp {
+	if s.Username == "" || (s.Exp != 0 && time.Now().Unix() >= s.Exp) {
 		return "", false
 	}
 	return s.Username, true
@@ -71,7 +71,11 @@ type credentials struct {
 	Password string `json:"password"`
 }
 
-func RegisterRoutes(mux *http.ServeMux, admin *Administrator, aud *audit.Client) {
+type auditRecorder interface {
+	Record(context.Context, string, string, map[string]any)
+}
+
+func RegisterRoutes(mux *http.ServeMux, admin *Administrator, aud auditRecorder) {
 	mux.HandleFunc("POST /api/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		var c credentials
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
@@ -87,14 +91,7 @@ func RegisterRoutes(mux *http.ServeMux, admin *Administrator, aud *audit.Client)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{
-			Name:     sessionCookieName,
-			Value:    token,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
-			MaxAge:   int(sessionDuration.Seconds()),
-		})
+		setSessionCookie(w, token)
 		aud.Record(r.Context(), "login", admin.Username, nil)
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -112,8 +109,28 @@ func RegisterRoutes(mux *http.ServeMux, admin *Administrator, aud *audit.Client)
 			http.Error(w, "nao autenticado", http.StatusUnauthorized)
 			return
 		}
+		// Renova o armazenamento no navegador e migra sessoes legadas ainda validas.
+		token, err := issueToken(username, admin.secret())
+		if err != nil {
+			http.Error(w, "falha ao renovar sessao", http.StatusInternalServerError)
+			return
+		}
+		setSessionCookie(w, token)
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(map[string]string{"username": username})
+	})
+}
+
+func setSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(sessionCookieLifetime.Seconds()),
+		Expires:  time.Now().Add(sessionCookieLifetime),
 	})
 }
 

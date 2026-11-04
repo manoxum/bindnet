@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Ban, ScanSearch, Undo2, WifiOff } from "lucide-react";
+import { ScanSearch } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { formatSpeedNow } from "@/components/hotspot/hotspot-limits-types";
 import { useClientsStats } from "@/components/hotspot/useHotspotQueries";
 import { DeviceIdentifyModal } from "@/components/hotspot/DeviceIdentifyModal";
 import { WifiSignalIndicator } from "@/components/hotspot/WifiSignalIndicator";
+import { HotspotDeviceBlockActions } from "@/components/hotspot/HotspotDeviceBlockActions";
 import type { HotspotBlockMode } from "@/components/hotspot/useHotspotMutations";
 
 // "manual" (bloqueio explicito do admin, modo "deauth" - desconectado
@@ -35,16 +36,8 @@ export interface HotspotClient {
   signalDbm?: number;
 }
 
-// blockStatusLabel traduz blocked/blockReason num rotulo+variante de
-// Badge - reusado pela listagem (HotspotClientsCard), pelo resumo do
-// dispositivo (DeviceOverviewTab.tsx) e pelo cabecalho da pagina de
-// detalhe (HotspotDeviceDetail.tsx), pra nunca os textos divergirem.
-// "online" e opcional (default true) porque em HotspotClientsCard todo
-// cliente da lista ja esta, por definicao, conectado agora - so a
-// pagina de detalhe/HotspotKnownDevicesCard precisam distinguir
-// online de offline explicitamente (dispositivo pode estar bloqueado
-// E offline ao mesmo tempo; bloqueio sempre prevalece na exibicao,
-// segue a mesma prioridade de deviceBlockReason no backend).
+// Rotulo compartilhado pela lista, resumo e cabecalho do dispositivo.
+// Bloqueio prevalece sobre online/offline, seguindo a prioridade do backend.
 export function blockStatusLabel(
   client: Pick<HotspotClient, "blocked" | "blockReason">,
   online = true,
@@ -172,41 +165,14 @@ export function HotspotClientsCard({
                       <ScanSearch className="h-4 w-4" />
                       <span className="hidden sm:inline">Identificar</span>
                     </Button>
-                    {client.blocked ? (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        aria-label="Desbloquear"
-                        disabled={unblockPendingMac === client.mac}
-                        onClick={() => onUnblock(client.mac)}
-                      >
-                        <Undo2 className="h-4 w-4" />
-                        <span className="hidden sm:inline">Desbloquear</span>
-                      </Button>
-                    ) : (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          aria-label="Cortar tráfego"
-                          disabled={blockPendingMac === client.mac}
-                          onClick={() => onBlock(client.mac, "traffic")}
-                        >
-                          <WifiOff className="h-4 w-4" />
-                          <span className="hidden sm:inline">Cortar tráfego</span>
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          aria-label="Bloquear"
-                          disabled={blockPendingMac === client.mac}
-                          onClick={() => onBlock(client.mac, "deauth")}
-                        >
-                          <Ban className="h-4 w-4" />
-                          <span className="hidden sm:inline">Bloquear</span>
-                        </Button>
-                      </>
-                    )}
+                    <HotspotDeviceBlockActions
+                      mac={client.mac}
+                      blocked={!!client.blocked}
+                      blockPendingMac={blockPendingMac}
+                      unblockPendingMac={unblockPendingMac}
+                      onBlock={onBlock}
+                      onUnblock={onUnblock}
+                    />
                   </div>
                 </TableCell>
               </TableRow>

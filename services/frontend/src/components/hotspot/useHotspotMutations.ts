@@ -3,12 +3,9 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { ConfigForm } from "@/components/hotspot/hotspot-schema";
 import type { HotspotClient } from "@/components/hotspot/HotspotClientsCard";
+import { useHotspotBlockMutations } from "@/components/hotspot/useHotspotBlockMutations";
 
-// "deauth" derruba o dispositivo do Wi-Fi (hostapd deny_acl+deauth,
-// comportamento historico); "traffic" so bloqueia o trafego via
-// iptables, dispositivo continua conectado - ver
-// services/backend/hotspot_blocklist.go.
-export type HotspotBlockMode = "deauth" | "traffic";
+export type { HotspotBlockMode } from "@/components/hotspot/useHotspotBlockMutations";
 
 interface UseHotspotMutationsOptions {
   onSaveSuccess: () => void;
@@ -17,6 +14,7 @@ interface UseHotspotMutationsOptions {
 
 export function useHotspotMutations({ onSaveSuccess, onRecoverSuccess }: UseHotspotMutationsOptions) {
   const queryClient = useQueryClient();
+  const { block, unblock } = useHotspotBlockMutations();
 
   // Salva e já aplica (reinicia o hotspot) numa única ação - separar em
   // dois passos só criava a falsa impressão de que "salvar" bastava, mas
@@ -73,27 +71,6 @@ export function useHotspotMutations({ onSaveSuccess, onRecoverSuccess }: UseHots
       onRecoverSuccess();
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao recuperar Wi-Fi"),
-  });
-
-  const block = useMutation({
-    mutationFn: ({ mac, mode }: { mac: string; mode: HotspotBlockMode }) =>
-      api.post("/hotspot/blocklist", { mac, mode }),
-    onSuccess: () => {
-      toast.success("Cliente bloqueado.");
-      queryClient.invalidateQueries({ queryKey: ["hotspot", "clients"] });
-      queryClient.invalidateQueries({ queryKey: ["hotspot", "blocklist"] });
-    },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao bloquear cliente"),
-  });
-
-  const unblock = useMutation({
-    mutationFn: (mac: string) => api.del(`/hotspot/blocklist/${encodeURIComponent(mac)}`),
-    onSuccess: () => {
-      toast.success("Cliente desbloqueado.");
-      queryClient.invalidateQueries({ queryKey: ["hotspot", "clients"] });
-      queryClient.invalidateQueries({ queryKey: ["hotspot", "blocklist"] });
-    },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao desbloquear cliente"),
   });
 
   // Nao apaga o log nativo do Docker (nao ha como, ver

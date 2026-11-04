@@ -189,6 +189,16 @@ locais do DNS e emitir/listar/revogar/baixar certificados TLS assinados
 por uma CA local — sem precisar rodar `docker compose`/editar `.env`
 manualmente no dia a dia.
 
+O login permanece entre visitas e reinícios: a sessão não expira no
+servidor, e o cookie persistente é renovado a cada visita ao painel.
+Sair, apagar os cookies ou trocar as credenciais exige novo login.
+
+Ao abrir `bindnet.local.com` no próprio computador que hospeda o Bindnet,
+a raiz redireciona para `admin.bindnet.local.com`; nos outros dispositivos,
+continua sendo o portal cativo. Para manter o portal também no host, defina
+`PORTAL_HOST_REDIRECT_ENABLED=false` no ambiente de implantação. O padrão
+é `true`; a opção é lida pelo backend na inicialização.
+
 ### Tudo junto
 
 ```bash
@@ -223,6 +233,7 @@ Resumo das mais relevantes:
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | sim (criação/atualização) | — | credenciais do painel web |
 | `BACKEND_PORT` | não | `8090` | porta da API do painel (`backend`) |
 | `FRONTEND_PORT` | não | `9090` | porta da interface web do painel (`frontend`) |
+| `PORTAL_HOST_REDIRECT_ENABLED` | não | `true` | redireciona a raiz do portal ao painel somente no próprio host |
 | `POSTGRES_PORT` | não | `9054` | porta local publicada para manutenção do Postgres |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | sim | — | credenciais do banco principal (dados de certificados) |
 | `MONGO_USER` / `MONGO_PASSWORD` / `MONGO_DB` | sim | — | credenciais da trilha de auditoria do painel |
@@ -263,14 +274,15 @@ continuam funcionando sem precisar reimportar nada (veja
 
 ## Operação
 
-O entrypoint operacional do repo é o mesmo padrão usado no FlowKey:
-`Makefile` delega para o submódulo `bin/promote`, e `promote.yml`
-define estágio atual, arquivos Compose, volumes/overlays de dev e
-segredos declarados.
+Sem alvo, `make` executa `docker compose --env-file .env.main up --build -d`
+(também disponível em `make up`). Os restantes alvos mantêm o fluxo do
+submódulo `bin/promote`; `promote.yml` define estágio atual, arquivos Compose,
+volumes/overlays de dev e segredos declarados.
 
 Comandos principais:
 
 ```bash
+make            # docker compose --env-file .env.main up --build -d
 make dev        # bin/promote dev
 make run-local  # service
 make run-infra
@@ -278,6 +290,48 @@ make run-service
 make stop-all
 make dist       # resolve includes para deployment/
 ```
+
+### Atalho de desenvolvimento no Linux
+
+Como no Wharnex, `make install-dev` instala um launcher ligado a este
+checkout, sem sudo. Requer Python 3 com Tk (`python3-tk` em Debian/Ubuntu),
+Docker Engine, o plugin Docker Compose v2 e `xdg-open`.
+
+```bash
+make install-dev
+```
+
+Abra **Bindnet (desenvolvimento)** no menu de aplicações ou execute
+`make start-dev`. A tela de abertura apresenta a versão, valida Docker e
+o ambiente existente (`.env.<current_stage>` de `promote.yml`, com fallback
+para `.env`) e pede confirmação antes de compilar/iniciar o stack. O Docker
+deve estar iniciado e acessível ao utilizador sem sudo. Nenhum serviço é
+iniciado durante a instalação do atalho.
+
+Depois da confirmação, o launcher compila as imagens com os Dockerfiles
+normais (incluindo o build React/TypeScript e os binários Go), reutilizando
+o cache do Docker. Cria as redes externas `wnet`/`dbnet` apenas se faltarem,
+sobe o projeto Compose `bindnet` e aguarda o painel e a API através de
+**https://admin.bindnet.local.com** antes de abrir esse endereço no
+navegador padrão. O arranque pode reativar o hotspot conforme a configuração
+guardada no painel e interromper a rede em uso.
+
+O domínio deve resolver para esta máquina, com o site HTTPS do nginx-ui
+configurado para o gateway e a CA local já confiada pelo sistema/navegador
+(veja [SoT/edge-and-ca-page.md](SoT/edge-and-ca-page.md)). Numa instalação
+nova, prepare o ambiente com `scripts/gen-secrets.sh --out .env.main` e
+revise-o. Se DNS/TLS ainda não estiverem configurados, o launcher indica
+o acesso direto ao painel por `http://127.0.0.1:9090` (ou `FRONTEND_PORT`)
+para concluir essa configuração; os serviços permanecem ativos.
+
+O launcher preserva ambientes, configurações e volumes existentes. Os
+registos ficam em `.harness/logs/launcher.log` e também podem ser consultados
+na tela de abertura. Reexecutar `make install-dev` atualiza o atalho para o
+checkout atual. Para desenvolvimento com recarregamento de código, continua
+disponível o fluxo `make dev`/`make watch` do `bin/promote`.
+
+`make check-launcher` valida instalação e ciclo de arranque com comandos
+Docker simulados, sem iniciar containers ou tocar na rede física.
 
 O compose é dividido em camadas:
 
@@ -362,3 +416,21 @@ AGENTS.md                   # diretrizes para ferramentas de IA neste repo
   `*.local` pelo `nginx-ui` por padrão — mantenha o acesso só por
   IP:porta direta (`FRONTEND_PORT`/`BACKEND_PORT`) a menos que você
   decida expor deliberadamente depois.
+
+## Túneis Pangolin Cloud
+
+Em **Túneis**, cadastre uma ou mais contas e escolha **Sites → Novo site**.
+O modal pede nome público e domínio DNS local do nginx. O Bindnet cria site,
+recurso e alvo pela API oficial e inicia automaticamente um container Newt:
+**Pangolin → Bindnet → nginx → aplicação**. Não precisa informar o IP da app.
+
+A interface aceita domínios próprios e namespaces gratuitos. Algumas rotas de
+disponibilidade aparecem no OpenAPI, mas retornam 404 no Cloud; nesse caso,
+combina recursos existentes com o catálogo Cloud confirmado (`hostlocal.app`,
+`tunneled.to`, `tunnelmy.app` e `visitmy.app`), inclusive para contas vazias.
+A disponibilidade do nome é confirmada pelo Pangolin na criação.
+
+Recursos têm edição de destino, proxy, autenticação, acesso e manutenção.
+Chaves e credenciais ficam no PostgreSQL. As migrations preservam a integração
+anterior como conta principal. Consulte pré-requisitos, limitações e operação
+em [SoT/pangolin.md](SoT/pangolin.md).

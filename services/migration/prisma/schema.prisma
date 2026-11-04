@@ -717,3 +717,72 @@ model HotspotMessageRead {
   @@index([mac])
   @@map("hotspot_message_reads")
 }
+
+// Integração Pangolin: segredos nunca são devolvidos nas respostas do painel.
+model PangolinConfig {
+  id        Int      @id @default(1)
+  apiUrl    String   @default("") @map("api_url")
+  endpoint  String   @default("")
+  orgId     String   @default("") @map("org_id")
+  apiKey    String   @default("") @map("api_key")
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("pangolin_config")
+}
+
+model PangolinSite {
+  siteId    Int      @id @map("site_id")
+  name      String   @default("")
+  newtId    String   @default("") @map("newt_id")
+  secret    String   @default("")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("pangolin_sites")
+}
+
+model PangolinResource {
+  localDomain String @default("") @map("local_domain")
+  resourceId Int @id @map("resource_id")
+  siteId     Int @map("site_id")
+
+  @@index([siteId], map: "pangolin_resources_site_idx")
+  @@map("pangolin_resources")
+}
+
+// Contas Pangolin independentes; a integração legada é importada pela migration.
+model PangolinAccount {
+  id String @id
+  name String @default("")
+  apiUrl String @default("") @map("api_url")
+  endpoint String @default("")
+  orgId String @default("") @map("org_id")
+  apiKey String @default("") @map("api_key")
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("pangolin_accounts")
+}
+
+model PangolinAccountSite {
+  id String @id @default(dbgenerated("gen_random_uuid()::text"))
+  accountId String @map("account_id")
+  siteId Int @map("site_id")
+  name String @default("")
+  newtId String @default("") @map("newt_id")
+  secret String @default("")
+  desiredRunning Boolean @default(true) @map("desired_running")
+
+  @@unique([accountId,siteId],map:"pangolin_account_sites_remote_idx")
+  @@map("pangolin_account_sites")
+}
+
+model PangolinAccountResource {
+  id String @id @default(dbgenerated("gen_random_uuid()::text"))
+  accountId String @map("account_id")
+  resourceId Int @map("resource_id")
+  siteId Int @map("site_id")
+  localDomain String @default("") @map("local_domain")
+
+  @@unique([accountId,resourceId],map:"pangolin_account_resources_remote_idx")
+  @@index([accountId,siteId],map:"pangolin_account_resources_site_idx")
+  @@map("pangolin_account_resources")
+}

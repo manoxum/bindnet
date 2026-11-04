@@ -15,6 +15,8 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_buffering off;
+        # O primeiro arranque do Newt pode incluir o download da imagem.
+        proxy_read_timeout 240s;
     }
 
     # Assets com hash no nome (assets/index-<hash>.js) podem ser

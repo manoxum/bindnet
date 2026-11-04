@@ -26,11 +26,29 @@ domínio** do Bindnet. Não é exposto ao host nem à rede do hotspot: a
   `${STAGE:-main}.nginx-ui.bindnet.wnet`). O `gateway` roteia por `Host`.
 - **Roteamento**:
   - `admin.bindnet.local.com` → painel de administração (SPA na raiz);
-  - `bindnet.local.com` → portal cativo diretamente na raiz;
+  - `bindnet.local.com` → portal cativo diretamente na raiz para outros
+    dispositivos; no próprio host, a raiz redireciona ao painel conforme
+    a opção abaixo;
   - `/api/` em ambos → direto ao `backend`;
   - qualquer outro `Host` → `444` (fecha a conexão). Sem esse
     `default_server`, um Host desconhecido cairia no primeiro `server`
     e receberia o painel por engano.
+- **Acesso no próprio servidor**: com
+  `PORTAL_HOST_REDIRECT_ENABLED=true` (padrão), a raiz de
+  `bindnet.local.com` responde `302` para `admin.bindnet.local.com/`,
+  conservando HTTP/HTTPS. O `gateway` faz uma subconsulta `auth_request`
+  a `GET /api/portal/access`; o backend consulta
+  `GET /network/local-client?ip=...` no socket interno do worker. O worker
+  compara o IP original da cadeia `X-Forwarded-For` com os endereços
+  atuais das interfaces do host (incluindo bridges Docker) ou loopback,
+  em IPv4/IPv6. A comparação é por endereço exato, nunca por sub-rede:
+  clientes do hotspot e da LAN continuam no portal. Não há mudança de
+  rede nem dependência de sessão administrativa nessa identificação.
+  A decisão e o redirect não são cacheados. Se o worker estiver
+  indisponível, conserva o portal. Definir a variável como `false`
+  conserva o portal também no host; valor inválido impede o backend de
+  iniciar. `/ca`, assets, `/api/` e o domínio administrativo mantêm seu
+  roteamento; `/portal` continua indo à raiz por compatibilidade.
 - **Separação no frontend**: o hostname escolhe a superfície antes do
   roteamento React. `PortalApp` e `AdminApp` são imports dinâmicos
   distintos; o domínio público não carrega as páginas administrativas.

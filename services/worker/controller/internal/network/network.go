@@ -14,6 +14,7 @@ import (
 
 func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /network/interfaces", handleInterfaces)
+	mux.HandleFunc("GET /network/local-client", handleLocalClient)
 	mux.HandleFunc("POST /network/wifi-unmanage", handleWifiUnmanage)
 	mux.HandleFunc("POST /network/wifi-manage", handleWifiManage)
 	mux.HandleFunc("POST /network/dns-test", handleDNSTest)

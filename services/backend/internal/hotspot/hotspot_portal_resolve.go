@@ -2,13 +2,12 @@ package hotspot
 
 import (
 	"bindnet/backend/internal/hotspot/store"
+	"bindnet/backend/internal/platform/requestip"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
 	"log"
-	"net"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -60,11 +59,5 @@ func hotspotPortalURL() string {
 }
 
 func clientIPFromRequest(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return strings.TrimSpace(r.RemoteAddr)
+	return requestip.ClientIP(r)
 }

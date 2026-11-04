@@ -56,6 +56,16 @@
   /api/hotspot/start` e `POST /api/hotspot/apply` sempre reaplicam a
   blocklist inteira depois de subir o hotspot (com retry curto,
   já que o `hostapd` leva alguns segundos para ficar pronto).
+- A página de detalhes do cliente oferece as mesmas ações manuais das
+  listas, inclusive para dispositivos offline: **Cortar tráfego** mantém
+  a associação Wi-Fi e bloqueia o tráfego (`mode=traffic`); **Bloquear**
+  desconecta e impede a reconexão (`mode=deauth`); **Desbloquear** remove
+  o bloqueio manual cadastrado. As ações ficam no cabeçalho, disponíveis
+  em qualquer aba, com botões acessíveis também no celular. Durante a
+  operação ficam desabilitadas para evitar comandos concorrentes no
+  mesmo dispositivo; ao concluir, atualizam clientes conectados, lista
+  de bloqueados e dispositivos conhecidos. Desbloquear não remove limites
+  automáticos por crédito/cota; esses continuam geridos pelas suas abas.
 
 ## Perfis de dispositivo, vouchers de recarga e portal cativo (`services/backend/hotspot_profiles*.go`, `hotspot_vouchers.go`, `hotspot_portal.go`)
 

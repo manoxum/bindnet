@@ -17,12 +17,14 @@ correspondente na mesma alteração.
 | [hotspot-clients.md](hotspot-clients.md) | dispositivos, vouchers, portal cativo e avisos |
 | [content-and-isolation.md](content-and-isolation.md) | isolamento de clientes e políticas de conteúdo |
 | [dns.md](dns.md) | DNS split-horizon, TLDs locais e descoberta |
+| [pangolin.md](pangolin.md) | túneis Pangolin Cloud, API e conectores locais |
 | [certificates.md](certificates.md) | CA local e gestão de certificados |
 | [edge-and-ca-page.md](edge-and-ca-page.md) | nginx-ui, gateway e página pública da CA |
 | [data.md](data.md) | PostgreSQL, MongoDB, Redis, MinIO e migrations |
 | [admin-panel.md](admin-panel.md) | responsabilidades do painel, backend e worker |
 | [cross-cutting.md](cross-cutting.md) | regras que atravessam todo o stack |
 | [architecture.md](architecture.md) | composição do sistema, responsabilidades e fronteiras entre serviços |
+| [narto.md](narto.md) | site HTTPS Narto Studio, DNS e certificado local |
 | [operations.md](operations.md) | operação segura, ambientes e comandos de manutenção |
 | [security.md](security.md) | segredos, privilégios, volumes e dados persistentes |
 | [bin/](../bin/SoT/README.md) | contrato operacional reutilizável do submódulo `bin` |

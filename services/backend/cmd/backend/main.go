@@ -18,8 +18,10 @@ import (
 	"bindnet/backend/internal/dns"
 	"bindnet/backend/internal/hotspot"
 	"bindnet/backend/internal/hotspot/store"
+	"bindnet/backend/internal/pangolin"
 	"bindnet/backend/internal/platform/config"
 	"bindnet/backend/internal/platform/db"
+	"bindnet/backend/internal/portal"
 	"bindnet/backend/internal/settings"
 	"bindnet/backend/internal/setup"
 	"bindnet/backend/internal/workerapi"
@@ -73,8 +75,12 @@ func main() {
 	speedHistory := hotspot.NewDeviceSpeedHistoryStore()
 
 	mux := http.NewServeMux()
+	if err := portal.RegisterRoutes(mux, worker); err != nil {
+		log.Fatalf("[backend] erro ao configurar redirecionamento do portal: %v", err)
+	}
 	setup.RegisterSetupRoutes(mux, admin, database, auditClient)
 	settings.RegisterRoutes(mux, admin, database, auditClient)
+	tunnels := pangolin.RegisterRoutes(mux, admin, database, worker, auditClient)
 	auth.RegisterRoutes(mux, admin, auditClient)
 	setup.RegisterDashboardRoutes(mux, worker, admin)
 	hotspot.RegisterHotspotRoutes(mux, worker, admin, auditClient, database)
@@ -106,6 +112,7 @@ func main() {
 	cert.RegisterCertificateRoutes(mux, admin, database, ca, worker, auditClient)
 	cert.RegisterNginxUIRoutes(mux, admin)
 
+	go tunnels.StartConnectorReconciliationLoop(context.Background())
 	go hotspot.AutoStartHotspotOnBoot(database, worker, auditClient)
 	go hotspot.StartHotspotReconciliationLoop(database, worker, auditClient, 15*time.Second)
 	go hotspot.StartHotspotUsageSamplingLoop(database, worker, creditTrace, speedHistory, time.Second)

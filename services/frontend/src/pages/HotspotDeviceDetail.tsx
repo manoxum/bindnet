@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/bindnets/EmptyState";
 import { useHotspotQueries } from "@/components/hotspot/useHotspotQueries";
+import { useHotspotBlockMutations } from "@/components/hotspot/useHotspotBlockMutations";
+import { HotspotDeviceBlockActions } from "@/components/hotspot/HotspotDeviceBlockActions";
 import { DeviceOverviewTab } from "@/components/hotspot/device-detail/DeviceOverviewTab";
 import { DeviceLimitsTab } from "@/components/hotspot/device-detail/DeviceLimitsTab";
 import { DeviceCreditCard } from "@/components/hotspot/device-detail/DeviceCreditCard";
@@ -59,12 +61,14 @@ export function HotspotDeviceDetailPage() {
   const [messageOpen, setMessageOpen] = useState(false);
   const [tab, setTab] = useUrlTab("overview");
 
-  const { clients, knownDevices } = useHotspotQueries();
+  const { clients, knownDevices, blocklist } = useHotspotQueries();
+  const { block, unblock } = useHotspotBlockMutations();
   const liveClient = clients.data?.find((candidate) => candidate.mac === mac);
   const knownDevice = knownDevices.data?.find((candidate) => candidate.mac === mac);
   const client = liveClient ?? (knownDevice ? knownDeviceAsClient(knownDevice) : undefined);
   const online = !!liveClient;
   const loading = clients.isLoading || knownDevices.isLoading;
+  const manuallyBlocked = blocklist.data?.some((device) => device.macAddress === mac) ?? false;
 
   usePageHeader({ title: client?.alias || client?.deviceName || client?.vendor || mac, description: client?.ip });
 
@@ -91,20 +95,38 @@ export function HotspotDeviceDetailPage() {
           <ArrowLeft className="h-4 w-4" />
           Hotspot
         </Button>
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold">{client.alias || client.deviceName || client.vendor || "Dispositivo"}</h1>
-            <p className="font-mono text-sm text-muted-foreground">{client.mac}</p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <div className="min-w-0">
+              <h1 className="break-words text-2xl font-semibold">{client.alias || client.deviceName || client.vendor || "Dispositivo"}</h1>
+              <p className="font-mono text-sm text-muted-foreground">{client.mac}</p>
+            </div>
+            {(() => {
+              const status = blockStatusLabel(client, online);
+              return <Badge variant={status.variant}>{status.label}</Badge>;
+            })()}
           </div>
-          {(() => {
-            const status = blockStatusLabel(client, online);
-            return <Badge variant={status.variant}>{status.label}</Badge>;
-          })()}
-          <Button size="sm" variant="outline" className="sm:ml-auto" onClick={() => setMessageOpen(true)}>
-            <MessageSquare className="h-4 w-4" />
-            <span className="hidden sm:inline">Enviar aviso</span>
-          </Button>
+          <div className="flex flex-wrap gap-2 sm:justify-end">
+            <HotspotDeviceBlockActions
+              mac={client.mac}
+              blocked={manuallyBlocked}
+              disabled={!blocklist.data || blocklist.isError}
+              blockPendingMac={block.isPending ? block.variables.mac : undefined}
+              unblockPendingMac={unblock.isPending ? unblock.variables : undefined}
+              onBlock={(deviceMac, mode) => block.mutate({ mac: deviceMac, mode })}
+              onUnblock={(deviceMac) => unblock.mutate(deviceMac)}
+            />
+            <Button size="sm" variant="outline" aria-label="Enviar aviso" onClick={() => setMessageOpen(true)}>
+              <MessageSquare className="h-4 w-4" />
+              <span className="hidden sm:inline">Enviar aviso</span>
+            </Button>
+          </div>
         </div>
+        {blocklist.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            Não foi possível carregar os bloqueios. Atualize a página para tentar novamente.
+          </p>
+        )}
       </div>
 
       <HotspotMessageDialog open={messageOpen} onOpenChange={setMessageOpen} lockedMac={client.mac} />

@@ -55,6 +55,21 @@ Regras:
   `.env` e troca o segredo de sessão quando as credenciais mudarem.
   Se ambas ficarem vazias e o arquivo já existir, o administrador
   persistido continua valendo.
+- A sessão administrativa não tem expiração automática no servidor. O
+  cookie `bindnet_session` é persistente, `HttpOnly`, `SameSite=Strict` e
+  restrito ao hostname em que o login foi feito, sem `Domain` compartilhado
+  com o portal. O navegador o guarda por até 400 dias, prazo renovado em
+  cada `GET /api/auth/me` (incluindo cada visita ao painel). Fechar o
+  navegador ou reiniciar o backend com as mesmas credenciais preserva o
+  login. Sair remove o cookie; apagar cookies ou mudar as credenciais
+  exige novo login. Navegadores podem remover dados antes desse prazo.
+  Tokens antigos ainda válidos são migrados ao consultar a sessão; tokens
+  antigos já expirados continuam rejeitados.
+- `PORTAL_HOST_REDIRECT_ENABLED` é uma opção de implantação, vinda do
+  ambiente do backend/Compose (padrão `true`). Controla o encaminhamento
+  da raiz pública ao painel quando o acesso vem do próprio host, conforme
+  [edge-and-ca-page.md](edge-and-ca-page.md). Não concede uma sessão nem
+  altera as regras de autenticação.
 - Go em `services/worker/controller` segue a convenção original: sem
   dependências externas no `go.mod` (inclusive autenticação usa
   HMAC-SHA256 da biblioteca padrão em vez de bcrypt/JWT de terceiros).
@@ -63,3 +78,17 @@ Regras:
   dependências, porque não há alternativa razoável de biblioteca
   padrão para os protocolos de rede desses bancos — diferente do caso
   HMAC-SHA256, que a stdlib já resolve bem.
+
+## Túneis Pangolin
+
+A área administrativa `/tunnels` integra Pangolin Cloud pela Integration API
+oficial: configuração em PostgreSQL, criação de sites/recursos/destinos e
+controle específico dos conectores Newt pelo worker. As rotas
+`/api/tunnels/*` exigem sessão administrativa. O contrato, os limites de
+provisionamento e a recuperação de falhas estão em [pangolin.md](pangolin.md).
+
+A integração Pangolin suporta contas/organizações independentes, publicação
+num único modal (site + recurso + alvo DNS local nginx + container Newt) e
+configuração de recursos em abas. O limite entre capacidades da API e do painel
+Pangolin, inclusive o fallback de namespaces após HTTP 404, está documentado
+em [pangolin.md](pangolin.md).

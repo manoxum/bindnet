@@ -11,6 +11,7 @@ import { DnsPage } from "@/pages/Dns";
 import { CertificatesPage } from "@/pages/Certificates";
 import { BindnetsPage } from "@/pages/Bindnets";
 import { BindnetDetailPage } from "@/pages/BindnetDetail";
+import { TunnelsPage } from "@/pages/Tunnels";
 import { SettingsPage } from "@/pages/Settings";
 
 export default function AdminApp() {
@@ -40,6 +41,7 @@ export default function AdminApp() {
         <Route path="bindnets" element={<BindnetsPage />} />
         <Route path="bindnets/:nodeId" element={<BindnetDetailPage />} />
         <Route path="certificates" element={<CertificatesPage />} />
+        <Route path="tunnels" element={<TunnelsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
