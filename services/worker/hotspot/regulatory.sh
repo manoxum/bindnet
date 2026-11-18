@@ -55,6 +55,13 @@ wifi_radio_blocked() {
   [[ -n "${blocked}" ]]
 }
 
+require_wifi_radio_ready() {
+  if wifi_radio_blocked; then
+    log "ERRO: radio Wi-Fi bloqueado (rfkill). O hotspot aguarda o desbloqueio."
+    return 1
+  fi
+}
+
 ensure_wifi_radio_unblocked() {
   command -v rfkill >/dev/null 2>&1 || return 0
 

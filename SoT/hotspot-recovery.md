@@ -59,18 +59,17 @@
     subir outro (um `start` sozinho só responderia "Servico do hotspot
     ja esta em execucao"). O painel também deixou de mentir: mostra
     **"a iniciar…"** em vez de "ligado".
-  - **Rádio bloqueado (`rfkill`) desiste na hora.**
-    `attempt_hotspot_cycle` checa `wifi_radio_blocked` (`regulatory.sh`)
-    antes de qualquer tentativa e devolve falha definitiva. Sem isso,
-    desligar o Wi-Fi no sistema — que faz `rfkill` do phy inteiro e
-    portanto mata o AP, é o mesmo rádio — fazia cada ciclo torrar os 11
-    canais candidatos das duas bandas, gastando minutos e gravando 11
-    falsas "rejeições do adaptador" por ciclo no histórico de canais.
-    Quem religa é a Camada 2, que tenta de novo a cada 15s e tem
-    sucesso no instante em que o Wi-Fi voltar.
+  - **Rádio bloqueado (`rfkill`) suspende o arranque automático e a
+    recuperação.** O status interno devolve `radioBlocked` e o backend
+    mantém a intenção de ligar enquanto aguarda o rádio. A reconciliação
+    volta a tentar no ciclo seguinte ao desbloqueio. O arranque confirma
+    a disponibilidade antes de iniciar o runner e o runner reconfirma
+    antes de configurar o uplink. Uma rodada que começa bloqueada
+    termina antes de testar canais ou gravar falhas no histórico.
   - **O desbloqueio automático de `rfkill` vale só no start pedido pelo
     operador** (`HOTSPOT_START_REASON=manual`, propagado pelo backend no
-    corpo de `/hotspot/start` e pelo worker no `docker exec -e`).
+    corpo de `/hotspot/start` e pelo worker no `docker exec -e`). O
+    arranque manual comunica o erro se o rádio continuar bloqueado.
     Desbloquear numa auto-recuperação desfaria a ação de quem acabou de
     desligar o Wi-Fi: o interruptor de Wi-Fi do sistema simplesmente
     deixaria de funcionar enquanto o hotspot estivesse ligado. O caso

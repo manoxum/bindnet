@@ -55,14 +55,14 @@ func AutoStartHotspotOnBoot(db *sql.DB, worker *workerapi.Client, audit *audit.C
 			time.Sleep(3 * time.Second)
 		}
 
-		var status struct {
-			Running bool `json:"running"`
-		}
+		var status hotspotServiceStatus
 		if err := worker.Call(ctx, http.MethodGet, "/hotspot/status", nil, &status); err != nil {
 			lastErr = err
 			continue
 		}
-		if status.Running {
+		// A intencao ja foi gravada. A reconciliacao volta a tentar quando
+		// o radio for desbloqueado.
+		if status.Running || status.RadioBlocked {
 			return
 		}
 

@@ -156,9 +156,15 @@ setup_bindnet_virtual_uplink() {
   validate_real_internet_interface
 
   if ! ip link show "${BINDNET_UPLINK_INTERFACE}" >/dev/null 2>&1; then
-    ip link add "${BINDNET_UPLINK_INTERFACE}" type dummy
+    ip link add "${BINDNET_UPLINK_INTERFACE}" type dummy || return 1
   fi
-  ip link set "${BINDNET_UPLINK_INTERFACE}" up
+  # Configura antes de subir a dummy. Um IPv6 link-local aqui seria
+  # interpretado pelo navegador do host como mudanca da propria rede.
+  ip link set "${BINDNET_UPLINK_INTERFACE}" addrgenmode none || return 1
+  # 3 (IFAPROT_KERNEL_LL) tambem remove o endereco automatico que uma
+  # versao anterior possa ter deixado numa dummy ja existente.
+  ip -6 address flush dev "${BINDNET_UPLINK_INTERFACE}" scope link proto 3 || return 1
+  ip link set "${BINDNET_UPLINK_INTERFACE}" up || return 1
   sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
   if ! apply_bindnet_uplink_rules "${REAL_INTERNET_INTERFACE}"; then

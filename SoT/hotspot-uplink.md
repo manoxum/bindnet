@@ -1,5 +1,12 @@
 # Uplink e modo AP do hotspot
 
+- O `bn-uplink` é uma interface virtual estável usada pelo `create_ap`.
+  A troca da fonte física atualiza as regras IPv4 e a rota dedicada
+  da tabela 91 com o mesmo uplink e o mesmo AP ativos. O `bn-uplink`
+  desativa a geração automática de IPv6 link-local, pois o navegador
+  no host interpreta a criação ou remoção desse endereço como mudança
+  de rede. Uma troca que altere o endereço de saída pode exigir que
+  os clientes reconectem as sessões de Internet já abertas.
 - **`WIFI_AP_MODE`** (`auto` — padrão — ou `virtual`) decide o que
   acontece quando a interface física **não** está associada como cliente
   Wi-Fi no momento do start:

@@ -31,19 +31,26 @@ import (
 // na mao pelo painel.
 const hotspotStartingGrace = 60 * time.Second
 
+type hotspotServiceStatus struct {
+	Running      bool   `json:"running"`
+	Status       string `json:"status"`
+	RadioBlocked bool   `json:"radioBlocked"`
+}
+
 // reconcileHotspotService resolve o estado do servico e trata os dois
 // casos em que nao ha o que reconciliar por dispositivo. Devolve true
 // so quando o AP esta realmente no ar.
 func reconcileHotspotService(ctx context.Context, db *sql.DB, worker *workerapi.Client, audit *audit.Client, startingSince *time.Time) bool {
-	var status struct {
-		Running bool   `json:"running"`
-		Status  string `json:"status"`
-	}
+	var status hotspotServiceStatus
 	if err := worker.Call(ctx, http.MethodGet, "/hotspot/status", nil, &status); err != nil {
 		return false
 	}
 
 	if status.Running && status.Status == "starting" {
+		if status.RadioBlocked {
+			*startingSince = time.Time{}
+			return false
+		}
 		forceRestartIfStuckStarting(ctx, db, worker, startingSince)
 		return false
 	}
@@ -56,7 +63,9 @@ func reconcileHotspotService(ctx context.Context, db *sql.DB, worker *workerapi.
 		if err := closeStaleSessions(db, nil); err != nil {
 			log.Printf("[backend] reconciliacao: falha ao fechar sessoes com hotspot parado: %v", err)
 		}
-		recoverHotspotIfDesired(ctx, db, worker, audit)
+		if !status.RadioBlocked {
+			recoverHotspotIfDesired(ctx, db, worker, audit)
+		}
 		return false
 	}
 	return true

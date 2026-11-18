@@ -9,6 +9,7 @@ CONTROL_DIR="${HOTSPOT_CONTROL_DIR:-/run/bindnet-admin/hotspot}"
 SERVICE_LOG="${HOTSPOT_SERVICE_LOG:-/tmp/bindnet-hotspot-service.log}"
 RUNNER_PID_FILE="${CONTROL_DIR}/runner.pid"
 COMMAND="${1:-manager}"
+source "$(dirname "$0")/regulatory.sh"
 
 db_host() {
   printf '%s\n' "${POSTGRES_HOST:-10.91.0.10}"
@@ -224,6 +225,8 @@ start_service() {
     log "ERRO: configure o hotspot pelo painel antes de iniciar o servico."
     return 1
   fi
+  ensure_wifi_radio_unblocked
+  require_wifi_radio_ready || return 1
 
   log "Iniciando servico do hotspot dentro do container ja existente."
   nohup "$0" run >> "${SERVICE_LOG}" 2>&1 < /dev/null &
@@ -233,7 +236,11 @@ start_service() {
 status_service() {
   local running=false
   local running_instances=""
+  local radio_blocked=false
   local status="stopped"
+  if wifi_radio_blocked; then
+    radio_blocked=true
+  fi
   running_instances="$(create_ap --list-running 2>/dev/null || true)"
   if runtime_pid >/dev/null && grep -Eq '^[0-9]+[[:space:]]+' <<< "${running_instances}"; then
     running=true
@@ -242,7 +249,8 @@ status_service() {
     running=true
     status="starting"
   fi
-  printf '{"running":%s,"status":"%s","startedAt":""}\n' "${running}" "${status}"
+  printf '{"running":%s,"status":"%s","startedAt":"","radioBlocked":%s}\n' \
+    "${running}" "${status}" "${radio_blocked}"
 }
 
 manager() {
@@ -282,6 +290,7 @@ case "${COMMAND}" in
     exit 0
     ;;
   run)
+    require_wifi_radio_ready || exit 1
     load_runtime_config_from_db || exit 1
     ;;
   *)
@@ -345,18 +354,9 @@ source "$(dirname "$0")/anchor.sh"
 source "$(dirname "$0")/interfaces.sh"
 source "$(dirname "$0")/uplink.sh"
 source "$(dirname "$0")/uplink_monitor.sh"
-source "$(dirname "$0")/regulatory.sh"
 source "$(dirname "$0")/watchdog.sh"
 
-# ensure_wifi_radio_unblocked primeiro: um radio bloqueado por rfkill
-# faz "iw reg get"/"iw phy info" logo abaixo se comportarem de forma
-# estranha tambem, alem de rejeitar todos os canais igualmente. So
-# informativo dai em diante - log_wifi_regulatory_info roda uma vez no
-# inicio pra deixar visivel no log qualquer trava regulatoria de
-# firmware (phy self-managed) antes de qualquer tentativa de canal, ja
-# que isso e indistinguivel do lado de fora de "adapter can not
-# transmit" em canal especifico.
-ensure_wifi_radio_unblocked
+# Deixa visiveis restricoes regulatorias antes de escolher canal/banda.
 log_wifi_regulatory_info
 
 normalize_search_domains() {
@@ -484,7 +484,7 @@ try_create_ap() {
   # devolver erro. Como tentamos varios canais/bandas no mesmo processo,
   # garante novamente o uplink virtual antes de cada tentativa para que
   # o fallback seguinte nao quebre com "bn-uplink is not an interface".
-  setup_bindnet_virtual_uplink
+  setup_bindnet_virtual_uplink || return 2
 
   # Uma interface AP virtual so e util quando ha uma associacao Wi-Fi
   # cliente que precisa ser preservada. Em alguns kernels/drivers (observado
@@ -743,6 +743,9 @@ STOPPING=0
 LAST_GOOD_BAND=""
 LAST_GOOD_CHANNEL=""
 
+# Reconfere antes de instalar a limpeza e tocar no uplink: o radio pode
+# ter sido bloqueado enquanto o runner carregava a configuracao.
+require_wifi_radio_ready || exit 1
 CLEANUP_DONE=0
 
 cleanup() {
@@ -848,7 +851,7 @@ restore_physical_interface_type() {
 remove_stale_virtual_interfaces
 restore_physical_interface_type
 
-setup_bindnet_virtual_uplink
+setup_bindnet_virtual_uplink || exit 1
 start_uplink_monitor
 
 # attempt_hotspot_cycle faz uma rodada completa de tentativa de subir
@@ -873,22 +876,8 @@ attempt_hotspot_cycle() {
   # uplink).
   refresh_internet_strategy_from_db
 
-  # Radio desligado: desiste NA HORA (status 2 = falha definitiva, sai
-  # sem retentar - ver contrato de try_create_ap). Sem isto, cada ciclo
-  # torrava os 11 canais candidatos das duas bandas contra um radio em
-  # baixo, gastando minutos, enchendo o log e - pior - gravando 11
-  # falsas "rejeicoes do adaptador" no historico de canais por ciclo.
-  #
-  # Sair rapido e o comportamento certo aqui: quem religa e a
-  # reconciliacao do backend (ciclo de 15s), que vai tentar de novo e
-  # ter sucesso no instante em que o Wi-Fi voltar. Nao ha nada que este
-  # processo possa fazer enquanto o radio estiver bloqueado - e
-  # desbloquea-lo por conta propria seria desfazer o "desligar Wi-Fi"
-  # do usuario (ver ensure_wifi_radio_unblocked em regulatory.sh).
-  if wifi_radio_blocked; then
-    log "ERRO: radio Wi-Fi bloqueado (rfkill) - nenhum canal pode funcionar assim. Aguardando o Wi-Fi ser religado; o hotspot sobe sozinho quando isso acontecer."
-    return 2
-  fi
+  # O radio pode ser bloqueado entre tentativas. O backend aguarda o desbloqueio.
+  require_wifi_radio_ready || return 2
 
   # Tambem por tentativa, nao so na subida do script: um create_ap que
   # falhou no meio pode deixar a placa em "type AP", e a partir dai
