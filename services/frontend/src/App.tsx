@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { Network, ShieldAlert } from "lucide-react";
-import { appSurfaceForHostname } from "@/lib/app-hostname";
+import { appSurfaceForHostname, effectiveHostname } from "@/lib/app-hostname";
 
 // Cada domínio carrega apenas a sua superfície. Além de impedir que o
 // pathname escolha entre portal e administração, os imports dinâmicos
@@ -34,7 +34,7 @@ function UnsupportedHost() {
 }
 
 export default function App() {
-  const surface = appSurfaceForHostname(window.location.hostname);
+  const surface = appSurfaceForHostname(effectiveHostname());
 
   if (surface === "unknown") return <UnsupportedHost />;
 

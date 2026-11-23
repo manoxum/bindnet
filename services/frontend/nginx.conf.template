@@ -43,6 +43,10 @@ server {
     # "no-cache" nao proibe guardar - obriga a revalidar (ETag) antes de
     # reusar; o custo e um 304 por carregamento.
     location / {
+        # Informa ao SPA o Host visto pelo servidor (ex.: acesso via Pangolin
+        # com domínio público, mas Host admin.bindnet.local.com no nginx).
+        sub_filter_once on;
+        sub_filter '__BINDNET_SERVER_HOST__' '$host';
         add_header Cache-Control "no-cache";
         try_files $uri $uri/ /index.html;
     }

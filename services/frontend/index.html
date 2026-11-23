@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/09-nucleo.svg" />
+    <!-- O nginx do frontend substitui o placeholder pelo Host recebido (ver
+         nginx.conf.template). Atrás de um túnel (Pangolin) o hostname do
+         browser é o público, mas o Host chegado ao nginx é o do domínio local. -->
+    <meta name="bindnet-server-host" content="__BINDNET_SERVER_HOST__" />
     <title>Bindnet</title>
   </head>
   <body>

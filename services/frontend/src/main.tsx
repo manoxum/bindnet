@@ -7,10 +7,10 @@ import App from "./App";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppCrashFallback } from "@/components/AppCrashFallback";
-import { appSurfaceForHostname } from "@/lib/app-hostname";
+import { appSurfaceForHostname, effectiveHostname } from "@/lib/app-hostname";
 import "./index.css";
 
-const appSurface = appSurfaceForHostname(window.location.hostname);
+const appSurface = appSurfaceForHostname(effectiveHostname());
 document.title =
   appSurface === "portal"
     ? "Bindnet — Minha conexão"
