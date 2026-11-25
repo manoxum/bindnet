@@ -387,8 +387,17 @@ AGENTS.md                   # diretrizes para ferramentas de IA neste repo
   `DNS_LOCAL_TLDS` e `DOMAINS` como rotas DNS (`~dominio`) para
   `127.0.0.1`. Confirme o estado efetivo com `resolvectl status bn-dns`.
 - **Domínio local não resolve dentro de containers de outros projetos**:
-  configure o Docker daemon para usar o DNS do `bindnet` como upstream:
-  `sudo scripts/configure-docker-dns.sh` e depois reinicie o Docker. Sem
+  o deploy (`docker compose --env-file .env.main up --build -d`) já
+  roda o job `docker-host-config`, que grava o DNS do `bindnet` em
+  `/etc/docker/daemon.json` e, na primeira vez, reinicia o Docker do
+  host e retoma o deploy sozinho (acompanhe com
+  `journalctl -u bindnet-docker-dns-apply`). Para só editar o arquivo sem
+  reiniciar, use `DOCKER_DNS_RESTART=false`. Alternativa manual:
+  `sudo scripts/configure-docker-dns.sh`. O mesmo job registra o runtime
+  `bindnet-runc`, que injeta a CA local (`NODE_EXTRA_CA_CERTS` + bundle) em
+  todo container **criado depois**: containers antigos precisam ser
+  recriados para confiar na CA (erro típico:
+  `unable to verify the first certificate`). Sem
   isso, o DNS embutido do Docker (`127.0.0.11`) encaminha para o
   resolver do host e recebe a resposta da view host (`127.x.y.z`) em
   vez da view container (gateway Docker detectado no host).

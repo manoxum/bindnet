@@ -102,21 +102,16 @@ func NewHandler(cfg *core.Config, v core.View, responseIP string, blocks *blockl
 				A:   ip,
 			})
 		case dns.TypeSOA:
-			msg.Answer = append(msg.Answer, &dns.SOA{
-				Hdr:     dns.RR_Header{Name: dns.Fqdn(zone), Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 3600},
-				Ns:      "ns." + dns.Fqdn(zone),
-				Mbox:    "hostmaster." + dns.Fqdn(zone),
-				Serial:  1,
-				Refresh: 7200,
-				Retry:   3600,
-				Expire:  86400,
-				Minttl:  3600,
-			})
+			msg.Answer = append(msg.Answer, localSOA(zone))
 		default:
-			// AAAA/ANY/etc no zona local: NXDOMAIN, ver RULE.md - o stack
-			// nao tem IPv6 nem faz split-horizon multi-tipo para esses
-			// dominios.
-			msg.Rcode = dns.RcodeNameError
+			// AAAA/ANY/etc no zona local: o nome EXISTE (tem registro A),
+			// so nao ha dados desse tipo (o stack nao tem IPv6 nem faz
+			// split-horizon multi-tipo) -> NOERROR sem resposta (NODATA),
+			// com o SOA no authority para cache negativo. NXDOMAIN aqui
+			// quebrava resolvers musl (Alpine: ping, wget...), que
+			// descartam o A valido se QUALQUER consulta paralela
+			// (A/AAAA) voltar NXDOMAIN.
+			msg.Ns = append(msg.Ns, localSOA(zone))
 		}
 
 		_ = w.WriteMsg(msg)
@@ -191,4 +186,19 @@ func Serve(addr string, handler dns.HandlerFunc) error {
 	server := &dns.Server{Addr: addr, Net: "udp", Handler: mux}
 	log.Printf("[dns-provider] escutando em %s", addr)
 	return server.ListenAndServe()
+}
+
+// localSOA e o SOA sintetico minimo das zonas locais - usado como resposta
+// a consultas SOA e como authority das respostas NODATA.
+func localSOA(zone string) *dns.SOA {
+	return &dns.SOA{
+		Hdr:     dns.RR_Header{Name: dns.Fqdn(zone), Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 3600},
+		Ns:      "ns." + dns.Fqdn(zone),
+		Mbox:    "hostmaster." + dns.Fqdn(zone),
+		Serial:  1,
+		Refresh: 7200,
+		Retry:   3600,
+		Expire:  86400,
+		Minttl:  60,
+	}
 }

@@ -7,6 +7,11 @@ services:
       context: ./services/migration
       dockerfile: ${DOCKERFILE:-Dockerfile}
 
+  docker-host-config:
+    build:
+      context: ./services/docker-host-config
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+
   dns-provider:
     build:
       context: ./services/worker/dns

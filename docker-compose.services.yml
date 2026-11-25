@@ -14,6 +14,40 @@ services:
     networks:
       - proxy
 
+  # Job one-shot que alinha o Docker daemon do host com o DNS e a CA local
+  # do Bindnet, para que containers de QUALQUER projeto (a) resolvam os
+  # dominios do Bindnet pela view container (dns = gateway da rede "proxy")
+  # e (b) confiem na CA local (wrapper de runtime "bindnet-runc", instalado
+  # em /usr/local/lib/bindnet e registrado como default-runtime). Se o
+  # daemon em execucao ainda nao aplica isso, reinicia o Docker no host
+  # (via unidade transitoria do systemd, que depois retoma o
+  # "docker compose up -d") - por isso privileged + pid: host. Opcoes:
+  # DOCKER_DNS_RESTART=false (so edita o daemon.json),
+  # DOCKER_TRUST_CA=false (so DNS), DOCKER_DNS_CONFIGURE=false (nada).
+  docker-host-config:
+    image: ${DOCKERHUB:-zootakuxy}/private:bindnet-docker-host-config-${STAGE:-main}-${VERSION:-latest}
+    restart: "no"
+    privileged: true
+    pid: host
+    environment:
+      DOCKER_DNS_CONFIGURE: ${DOCKER_DNS_CONFIGURE:-true}
+      DOCKER_DNS_RESTART: ${DOCKER_DNS_RESTART:-true}
+      DOCKER_TRUST_CA: ${DOCKER_TRUST_CA:-true}
+      DOCKER_DNS_GATEWAY: ${DOCKER_DNS_GATEWAY:-10.91.0.1}
+      DOCKER_DNS_FALLBACK: ${DOCKER_DNS_FALLBACK:-1.1.1.1}
+      BINDNET_CA_URL: http://backend:${BACKEND_PORT:-8090}/api/mesh/ca
+      # Diretorio do projeto NO HOST, para retomar o deploy apos o restart.
+      BINDNET_PROJECT_DIR: ${BINDNET_PROJECT_DIR:-${PWD}}
+      BINDNET_ENV_FILE: ${BINDNET_ENV_FILE:-.env.main}
+    volumes:
+      - /etc/docker:/host-etc-docker
+      - /usr/local/lib/bindnet:/host-bindnet
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - proxy
+
   dns-provider:
     image: ${DOCKERHUB:-zootakuxy}/private:bindnet-dns-provider-${STAGE:-main}-${VERSION:-latest}
     restart: unless-stopped

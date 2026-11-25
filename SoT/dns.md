@@ -153,7 +153,7 @@ Regras:
     conectados ao hotspot Wi-Fi. Registros `A` para os TLDs locais
     sempre respondem com o próprio `HOTSPOT_GATEWAY`.
   - Em qualquer view, registros `AAAA`/`ANY` para os TLDs locais
-    sempre respondem `NXDOMAIN` (sem IPv6, sem split-horizon
+    sempre respondem `NOERROR` sem dados (NODATA, com o SOA no authority; sem IPv6, sem split-horizon
     multi-tipo) e `SOA` responde um registro sintético mínimo — sem
     isso, resolvers que validam autoridade de zona antes de aceitar a
     resposta (ex.: `systemd-resolved`) tratam a zona inteira como
@@ -201,9 +201,52 @@ Regras:
   `docker-compose.services.yml`, não para os nomes dos serviços).
 - Para que **qualquer container de qualquer projeto** resolva os TLDs
   locais pela view container, o Docker daemon do host deve usar o
-  gateway Docker do Bindnet como DNS upstream. O caminho versionado é
-  `sudo scripts/configure-docker-dns.sh`, que detecta esse gateway via
-  `docker network inspect` e grava `"dns": ["<gateway>"]` em
-  `/etc/docker/daemon.json`; aplicar de fato exige restart explícito do
-  Docker pelo operador.
+  gateway Docker do Bindnet como DNS upstream (sem isso, o `127.0.0.11`
+  encaminha ao resolver do host e a consulta chega pela view host,
+  `127.x.y.z`, inalcançável de dentro do container). O deploy faz isso
+  sozinho: o serviço one-shot `docker-host-config`
+  (`services/docker-host-config/`, `docker-compose.services.yml`; roda
+  `privileged` + `pid: host`):
+  1. grava `"dns": ["10.91.0.1", "1.1.1.1"]` em `/etc/docker/daemon.json`
+     (gateway fixo da rede `proxy`; `1.1.1.1` é fallback se o
+     `dns-provider` estiver fora), com backup `daemon.json.bak.<data>`;
+  2. se o daemon **em execução** ainda não usa o gateway (detectado pelo
+     `resolv.conf` do próprio job), reinicia o Docker no host. Como isso
+     derruba o job e o `docker compose up`, o restart é feito por uma
+     unidade transitória do systemd (`bindnet-docker-dns-apply`, via
+     `nsenter` no PID 1) que espera o Docker voltar e roda
+     `docker compose --env-file <env> up -d` de novo para concluir o
+     deploy (`journalctl -u bindnet-docker-dns-apply`). Nessa segunda
+     passada `DOCKER_DNS_RESTART=false` evita laço de restarts.
+  Em execuções seguintes é no-op. **A primeira execução derruba por
+  ~1 min todos os containers do host** (todos voltam pela política de
+  restart). Variáveis: `DOCKER_DNS_CONFIGURE=false` desliga tudo,
+  `DOCKER_DNS_RESTART=false` só edita o `daemon.json` (avisa e não
+  reinicia), `DOCKER_DNS_GATEWAY`, `DOCKER_DNS_FALLBACK`,
+  `BINDNET_PROJECT_DIR` (padrão `$PWD` do `docker compose`). O script
+  manual `sudo scripts/configure-docker-dns.sh` continua válido.
+- **Confiança na CA local dentro dos containers** (mesmo job
+  `docker-host-config`): o DNS certo faz `https://app.local.com` chegar ao
+  nginx do Bindnet, mas o Node (`fetch`) ignora o repositório de CAs do
+  sistema e falha com `unable to verify the first certificate`. Para que
+  **todo container novo de qualquer projeto** confie na CA sem alterar
+  nenhum compose, o job baixa a CA do backend (`GET /api/mesh/ca`, pública),
+  instala em `/usr/local/lib/bindnet` (`ca.crt` + wrapper `bindnet-runc`,
+  fonte em `services/docker-host-config/bindnet-runc`) e registra o wrapper
+  em `daemon.json` como `runtimes.bindnet-runc` + `default-runtime`. No
+  `create` de cada container o wrapper ajusta o `config.json` OCI antes de
+  chamar o `runc` real: monta a CA em `/etc/bindnet/ca.crt`, monta por cima
+  de `/etc/ssl/certs/ca-certificates.crt` (se a imagem tiver) um bundle =
+  bundle da própria imagem + CA (cache em `bundles/`), e define
+  `NODE_EXTRA_CA_CERTS` (e `REQUESTS_CA_BUNDLE` quando o bundle foi
+  montado) sem sobrescrever variáveis já definidas. Limites: (a) o Docker
+  grava o runtime na criação do container, então **containers já existentes
+  só passam a confiar na CA quando recriados**; (b) `docker exec` não herda
+  as variáveis injetadas (o bundle montado vale, `NODE_EXTRA_CA_CERTS` não);
+  (c) Java e imagens com CAs em outro caminho não são cobertos. Opt-out por
+  container: variável `BINDNET_TRUST_CA=false`; global:
+  `DOCKER_TRUST_CA=false`. O wrapper nunca impede um container de subir
+  (qualquer erro cai no `runc` original) e o job só o registra depois de
+  um autoteste no host (exige `python3`). Se o Docker não voltar do restart
+  em 90s, o `daemon.json` anterior (backup) é restaurado.
 

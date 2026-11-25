@@ -1,0 +1,148 @@
+#!/usr/bin/python3
+"""bindnet-runc: wrapper do runc que faz todo container confiar na CA local do Bindnet.
+
+Instalado pelo job `docker-host-config` em /usr/local/lib/bindnet e registrado
+no daemon.json como `default-runtime`. No `create`/`run`, ANTES de chamar o
+runc de verdade, ajusta o config.json OCI do container:
+
+  - monta a CA em /etc/bindnet/ca.crt (somente leitura);
+  - se a imagem tem /etc/ssl/certs/ca-certificates.crt, monta por cima dele
+    um bundle = bundle da PROPRIA imagem + CA do Bindnet (cache em bundles/);
+  - define NODE_EXTRA_CA_CERTS (Node nao le o repositorio do sistema) e, se o
+    bundle foi montado, REQUESTS_CA_BUNDLE - sem sobrescrever variaveis que o
+    container ja defina.
+
+Opt-out por container: variavel de ambiente BINDNET_TRUST_CA=false.
+
+Regra de ouro: este wrapper NUNCA pode impedir um container de subir. Qualquer
+erro cai no runc original com os argumentos intactos.
+"""
+import hashlib
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+CA_FILE = os.path.join(HERE, "ca.crt")
+BUNDLES_DIR = os.path.join(HERE, "bundles")
+CA_DEST = "/etc/bindnet/ca.crt"
+BUNDLE_DEST = "/etc/ssl/certs/ca-certificates.crt"
+
+
+def real_runc():
+    forced = os.environ.get("BINDNET_RUNC_REAL")
+    if forced:
+        return forced
+    for candidate in ("/usr/bin/runc", "/usr/local/bin/runc", "/usr/sbin/runc", "/sbin/runc"):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return "runc"
+
+
+def find_bundle(args):
+    """Devolve o diretorio do bundle se a invocacao for create/run, senao None."""
+    sub = None
+    for i, arg in enumerate(args):
+        if arg in ("create", "run"):
+            sub = i
+            break
+    if sub is None:
+        return None
+    rest = args[sub + 1:]
+    for i, arg in enumerate(rest):
+        if arg in ("--bundle", "-b") and i + 1 < len(rest):
+            return rest[i + 1]
+        if arg.startswith("--bundle="):
+            return arg.split("=", 1)[1]
+    return os.getcwd()
+
+
+def env_has(env, name):
+    prefix = name + "="
+    return any(item.startswith(prefix) for item in env)
+
+
+def combined_bundle(image_bundle_path):
+    """Bundle da imagem + CA do Bindnet, em cache identificado pelo conteudo."""
+    with open(image_bundle_path, "rb") as handle:
+        image_bundle = handle.read()
+    with open(CA_FILE, "rb") as handle:
+        ca = handle.read()
+    digest = hashlib.sha256(image_bundle + b"\0" + ca).hexdigest()[:24]
+    target = os.path.join(BUNDLES_DIR, digest + ".crt")
+    if not os.path.isfile(target):
+        os.makedirs(BUNDLES_DIR, exist_ok=True)
+        tmp = "%s.tmp.%d" % (target, os.getpid())
+        with open(tmp, "wb") as handle:
+            handle.write(image_bundle)
+            if not image_bundle.endswith(b"\n"):
+                handle.write(b"\n")
+            handle.write(ca)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, target)
+    return target
+
+
+def patch(bundle_dir):
+    config_path = os.path.join(bundle_dir, "config.json")
+    if not os.path.isfile(config_path) or not os.path.isfile(CA_FILE):
+        return
+    with open(config_path, "r", encoding="utf-8") as handle:
+        spec = json.load(handle)
+
+    process = spec.get("process") or {}
+    env = process.get("env")
+    if env is None:
+        env = []
+    if "BINDNET_TRUST_CA=false" in env:
+        return
+
+    mounts = spec.setdefault("mounts", [])
+    destinations = {m.get("destination") for m in mounts}
+
+    if CA_DEST not in destinations:
+        mounts.append({"destination": CA_DEST, "type": "bind", "source": CA_FILE,
+                       "options": ["rbind", "ro"]})
+
+    root_path = (spec.get("root") or {}).get("path", "rootfs")
+    rootfs = root_path if os.path.isabs(root_path) else os.path.join(bundle_dir, root_path)
+    image_bundle = os.path.join(rootfs, BUNDLE_DEST.lstrip("/"))
+    bundle_mounted = False
+    if (BUNDLE_DEST not in destinations and os.path.isfile(image_bundle)
+            and not os.path.islink(image_bundle)):
+        try:
+            source = combined_bundle(image_bundle)
+            mounts.append({"destination": BUNDLE_DEST, "type": "bind", "source": source,
+                           "options": ["rbind", "ro"]})
+            bundle_mounted = True
+        except Exception:
+            pass
+
+    if not env_has(env, "NODE_EXTRA_CA_CERTS"):
+        env.append("NODE_EXTRA_CA_CERTS=" + CA_DEST)
+    if bundle_mounted and not env_has(env, "REQUESTS_CA_BUNDLE"):
+        env.append("REQUESTS_CA_BUNDLE=" + BUNDLE_DEST)
+    process["env"] = env
+    spec["process"] = process
+
+    tmp = config_path + ".bindnet.%d" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(spec, handle)
+    os.chmod(tmp, os.stat(config_path).st_mode & 0o777)
+    os.replace(tmp, config_path)
+
+
+def main():
+    args = sys.argv[1:]
+    try:
+        bundle_dir = find_bundle(args)
+        if bundle_dir:
+            patch(bundle_dir)
+    except Exception:
+        pass
+    runc = real_runc()
+    os.execv(runc, [runc] + args) if os.path.isabs(runc) else os.execvp(runc, [runc] + args)
+
+
+if __name__ == "__main__":
+    main()
