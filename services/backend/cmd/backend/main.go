@@ -22,6 +22,7 @@ import (
 	"bindnet/backend/internal/platform/config"
 	"bindnet/backend/internal/platform/db"
 	"bindnet/backend/internal/portal"
+	"bindnet/backend/internal/publication"
 	"bindnet/backend/internal/settings"
 	"bindnet/backend/internal/setup"
 	"bindnet/backend/internal/workerapi"
@@ -111,6 +112,8 @@ func main() {
 	dns.RegisterLocalTLDRoutes(mux, admin, database, auditClient)
 	cert.RegisterCertificateRoutes(mux, admin, database, ca, worker, auditClient)
 	cert.RegisterNginxUIRoutes(mux, admin)
+	cert.RegisterIntegrationRoutes(mux, admin, database, ca, auditClient)
+	publication.RegisterRoutes(mux, admin)
 
 	go tunnels.StartConnectorReconciliationLoop(context.Background())
 	go hotspot.AutoStartHotspotOnBoot(database, worker, auditClient)

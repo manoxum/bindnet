@@ -100,3 +100,12 @@ domínio** do Bindnet. Não é exposto ao host nem à rede do hotspot: a
   identificação do dispositivo: instalar o certificado é útil mesmo
   quando o portal ainda não conseguiu identificar o MAC.
 
+
+## Pré-visualização para integrações
+
+`POST /api/integrations/publications/preview` exige sessão administrativa e
+valida nome, domínios, alias e porta, gerando uma configuração Nginx sem
+aplicá-la. O upstream usa variável e o resolvedor Docker; no modo
+`letsencrypt`, o bloco HTTP conserva a rota de desafio em `127.0.0.1:9180`.
+Os caminhos de certificado exibidos são ilustrativos: esta rota não emite
+certificados, não cria sites e não publica domínios.

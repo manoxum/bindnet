@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS integration_tokens ();
+ALTER TABLE integration_tokens ADD COLUMN IF NOT EXISTS id UUID PRIMARY KEY DEFAULT gen_random_uuid();
+ALTER TABLE integration_tokens ADD COLUMN IF NOT EXISTS name TEXT NOT NULL;
+ALTER TABLE integration_tokens ADD COLUMN IF NOT EXISTS prefix TEXT NOT NULL;
+ALTER TABLE integration_tokens ADD COLUMN IF NOT EXISTS token_hash TEXT NOT NULL UNIQUE;
+ALTER TABLE integration_tokens ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NOT NULL;
+ALTER TABLE integration_tokens ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ;
+ALTER TABLE integration_tokens ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
+ALTER TABLE integration_tokens ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;
+INSERT INTO integration_tokens (name,prefix,token_hash,expires_at)
+ SELECT 'Token legado','bnet_',value,CURRENT_TIMESTAMP + INTERVAL '90 days' FROM panel_config
+ WHERE key='CERTIFICATE_INTEGRATION_TOKEN_HASH' AND value<>''
+ ON CONFLICT (token_hash) DO NOTHING;
+DELETE FROM panel_config WHERE key='CERTIFICATE_INTEGRATION_TOKEN_HASH';

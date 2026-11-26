@@ -786,3 +786,15 @@ model PangolinAccountResource {
   @@index([accountId,siteId],map:"pangolin_account_resources_site_idx")
   @@map("pangolin_account_resources")
 }
+
+model IntegrationToken {
+ id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+ name String
+ prefix String
+ tokenHash String @unique @map("token_hash")
+ expiresAt DateTime @map("expires_at") @db.Timestamptz
+ revokedAt DateTime? @map("revoked_at") @db.Timestamptz
+ lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+ @@map("integration_tokens")
+}

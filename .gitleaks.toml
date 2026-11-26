@@ -1,0 +1,13 @@
+title = "Tokens de integracao Bindnet e KaxaFirme"
+[extend]
+useDefault = true
+[[rules]]
+id = "bindnet-integration-token"
+description = "Token Bindnet"
+regex = '''bnet_[A-Za-z0-9_-]{43}'''
+keywords = ["bnet_"]
+[[rules]]
+id = "kaxafirme-integration-token"
+description = "Token KaxaFirme"
+regex = '''kxf_[A-Za-z0-9_-]{43}'''
+keywords = ["kxf_"]

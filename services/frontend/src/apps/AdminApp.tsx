@@ -1,3 +1,4 @@
+import { IntegrationsPage } from "@/pages/Integrations";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { RequireAuth } from "@/components/RequireAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -42,6 +43,7 @@ export default function AdminApp() {
         <Route path="bindnets/:nodeId" element={<BindnetDetailPage />} />
         <Route path="certificates" element={<CertificatesPage />} />
         <Route path="tunnels" element={<TunnelsPage />} />
+        <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

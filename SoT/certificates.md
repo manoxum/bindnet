@@ -98,3 +98,35 @@ Regras:
   efeito que apagar o antigo `cert_proxy_data`: invalida a CA e todos
   os certificados já confiados nos dispositivos do usuário.
 
+
+## API de integração v1
+
+A página **API Token** permite emitir vários tokens independentes, com nome,
+validade (1 a 365 dias), prefixo visível, último uso e revogação individual.
+GET/POST `/api/integrations/tokens` e DELETE `/api/integrations/tokens/{id}`
+exigem sessão administrativa. O POST mostra o segredo uma única vez.
+Os tokens têm formato `bnet_` seguido de 43 caracteres base64url (256 bits
+aleatórios); só SHA-256 é guardado em `integration_tokens`. Um novo token não
+invalida os anteriores. A migration importa a chave única anterior como Token
+legado, com validade de 90 dias. Tokens do protótipo sem prefixo precisam ser
+reemitidos.
+
+GET `/api/integrations/v1/status` e POST `/api/integrations/v1/certificates`
+exigem `Authorization: Bearer TOKEN`. Revogação e validade são consultadas a
+cada pedido. O token não autoriza hotspot, DNS nem gestão de outros tokens.
+
+A emissão recebe `name` e `domains`, validados estritamente, e devolve
+`certificatePem` e `privateKeyPem` com `Cache-Control: no-store`. A API não
+sincroniza implicitamente o material com um Nginx local: a aplicação cliente
+importa-o na instância Nginx UI que configurou. O painel de certificados mantém
+seu fluxo de sincronização normal. Repetir um pedido reutiliza somente um
+certificado ativo emitido pelo mesmo token, com validade e SANs compatíveis.
+Certificados externos a esta API não têm chaves privadas exportadas por ela.
+O vínculo entre certificado e token fica em `panel_config`; as ações são
+auditadas com o identificador do token. Revogar um token não revoga certificados.
+
+Os padrões `bnet_[A-Za-z0-9_-]{43}` e `kxf_[A-Za-z0-9_-]{43}` também estão
+configurados em `.gitleaks.toml`. O hook `.githooks/pre-commit` bloqueia segredos
+completos no índice sem imprimir os valores. Num clone novo, habilite-o com
+`git config core.hooksPath .githooks`. A deteção pelo alojamento Git exige regras
+personalizadas equivalentes; o prefixo sozinho não ativa proteção no fornecedor.
